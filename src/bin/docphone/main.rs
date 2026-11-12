@@ -7,7 +7,10 @@ mod menu_app;
 mod message_app;
 mod task_app;
 
-use app::{ActiveApp, AppCommand};
+use app::{App, Launcher};
+use calculator_app::CalculatorApp;
+use message_app::MessageApp;
+use task_app::TaskApp;
 use esp_hal::delay::Delay;
 use esp_hal::main;
 
@@ -27,8 +30,15 @@ fn main() -> ! {
 
     epd.hw_init(&mut delay);
 
-    let mut current_app = ActiveApp::new();
-    current_app.draw(&mut epd, buf);
+    // Registre des apps, dans l'ordre du menu. Pour ajouter une app : creer son
+    // fichier, le declarer avec `mod` en haut de ce fichier, et l'ajouter ici.
+    let registry: &mut [&mut dyn App] = &mut [
+        &mut MessageApp::new(),
+        &mut TaskApp::new(),
+        &mut CalculatorApp::new(),
+    ];
+    let mut launcher = Launcher::new(registry);
+    launcher.draw(&mut epd, buf);
     esp_println::println!("Menu pret : UP, DOWN, ENTER, BACK puis Entree.");
     esp_println::println!("Heure non reglee : TIME AAAA-MM-JJ HH:MM (ex. TIME 2026-11-12 14:30).");
 
@@ -49,25 +59,12 @@ fn main() -> ! {
 
                     // TIME est une commande globale, valable dans toutes les apps.
                     if input == "TIME" || input.starts_with("TIME ") {
-                        handle_time_command(input[4..].trim(), &mut current_app, &mut epd, buf);
+                        handle_time_command(input[4..].trim(), &mut launcher, &mut epd, buf);
                         length = 0;
                         continue;
                     }
 
-                    let action = current_app.handle_input(input, &mut epd, buf);
-                    match action {
-                        AppCommand::OpenMessages => {
-                            esp_println::println!("Messages : texte libre ou BACK.");
-                        }
-                        AppCommand::OpenTasks => {
-                            esp_println::println!("Taches : ADD [!] <texte>, DONE <n>, CLEAR... Tape HELP pour toutes les commandes.");
-                        }
-                        AppCommand::OpenCalculator => {
-                            esp_println::println!("Calculatrice : expression (ex. 12 + 3), CLEAR ou BACK.");
-                        }
-                        AppCommand::Stay | AppCommand::BackToMenu => {}
-                    }
-                    current_app.activate(action, &mut epd, buf);
+                    launcher.handle_input(input, &mut epd, buf);
                     length = 0;
                 }
             }
@@ -84,7 +81,7 @@ fn main() -> ! {
     }
 }
 /// `TIME` affiche l'heure ; `TIME AAAA-MM-JJ HH:MM[:SS]` la regle.
-fn handle_time_command(argument: &str, current_app: &mut ActiveApp, epd: &mut Epd, buf: &mut [u8]) {
+fn handle_time_command(argument: &str, launcher: &mut Launcher, epd: &mut Epd, buf: &mut [u8]) {
     if argument.is_empty() {
         match clock::now() {
             Some(now) => esp_println::println!(
@@ -102,7 +99,7 @@ fn handle_time_command(argument: &str, current_app: &mut ActiveApp, epd: &mut Ep
         Some(now) => {
             clock::set(now);
             esp_println::println!("Heure reglee : {} {}", now.weekday_name(), now);
-            current_app.on_time_changed(epd, buf);
+            launcher.on_time_changed(epd, buf);
         }
         None => esp_println::println!(
             "Date invalide. Usage : TIME AAAA-MM-JJ HH:MM[:SS] (annees {} a {})",

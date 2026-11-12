@@ -6,7 +6,16 @@ use embedded_graphics::text::Text;
 use esp32_quick::{Epd, FrameBuffer, PX_HEIGHT, PX_WIDTH, clear_full_buffer};
 use heapless::{String as HeapString, Vec as HeapVec};
 
-use super::app::{App, AppCommand, Task, MAX_TASKS, MAX_TITLE_BYTES};
+use super::app::{App, AppCommand};
+
+pub const MAX_TASKS: usize = 8;
+pub const MAX_TITLE_BYTES: usize = 48;
+
+pub struct Task {
+    pub title: HeapString<MAX_TITLE_BYTES>,
+    pub done: bool,
+    pub urgent: bool,
+}
 
 pub struct TaskApp {
     pub tasks: HeapVec<Task, MAX_TASKS>,
@@ -136,6 +145,14 @@ fn draw_tasks(epd: &mut Epd, buf: &mut [u8], tasks: &HeapVec<Task, MAX_TASKS>) {
 }
 
 impl App for TaskApp {
+    fn name(&self) -> &'static str {
+        "Taches"
+    }
+
+    fn intro(&self) -> &'static str {
+        "ADD [!] <texte>, DONE <n>, CLEAR... Tape HELP pour toutes les commandes."
+    }
+
     fn draw(&mut self, epd: &mut Epd, buf: &mut [u8]) {
         draw_tasks(epd, buf, &self.tasks);
     }

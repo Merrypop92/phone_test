@@ -36,6 +36,14 @@ fn draw_message(epd: &mut Epd, buf: &mut [u8], message: &str) {
 }
 
 impl App for MessageApp {
+    fn name(&self) -> &'static str {
+        "Messages"
+    }
+
+    fn intro(&self) -> &'static str {
+        "texte libre ou BACK."
+    }
+
     fn draw(&mut self, epd: &mut Epd, buf: &mut [u8]) {
         if self.last_message.is_empty() {
             draw_message(epd, buf, "Tape un texte puis Entree");

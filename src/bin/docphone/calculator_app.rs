@@ -70,6 +70,14 @@ impl CalculatorApp {
 }
 
 impl App for CalculatorApp {
+    fn name(&self) -> &'static str {
+        "Calculatrice"
+    }
+
+    fn intro(&self) -> &'static str {
+        "expression (ex. 12 + 3), CLEAR ou BACK."
+    }
+
     fn draw(&mut self, epd: &mut Epd, buf: &mut [u8]) {
         clear_full_buffer(buf);
         {
