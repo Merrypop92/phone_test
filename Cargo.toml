@@ -4,25 +4,12 @@ name         = "esp32-quick"
 rust-version = "1.88"
 version      = "0.1.0"
 
+# Application principale. Les modules des apps sont dans src/bin/docphone/.
+# Les programmes de test du materiel sont dans examples/ :
+#   cargo run --example epaper_demo | keypad_test | lte_charge_test
 [[bin]]
-name = "esp32-quick"
-path = "./src/bin/main.rs"
-
-[[bin]]
-name = "epaper"
-path = "./src/bin/epaper.rs"
-
-[[bin]]
-name = "ui"
-path = "./src/bin/ui.rs"
-
-[[bin]]
-name = "keypad"
-path = "./src/bin/keypad.rs"
-
-[[bin]]
-name = "serial-console"
-path = "./src/bin/serial_console.rs"
+name = "docphone"
+path = "./src/bin/docphone/main.rs"
 
 [dependencies]
 esp-hal = { version = "~1.1.0", features = ["esp32", "unstable"] }

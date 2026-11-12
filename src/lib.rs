@@ -1,6 +1,6 @@
 #![no_std]
 
-//! Driver e-paper partage entre les differents binaires (`epaper`, `ui`, ...).
+//! Driver e-paper partage entre l'application (`docphone`) et les exemples (`epaper_demo`, ...).
 //!
 //! Port direct du driver C fonctionnel (Display_EPD_W21.cpp / Display_EPD_W21_spi.cpp,
 //! projet PlatformIO "indust"/"gooddisplay") vers Rust. On reste volontairement au plus
