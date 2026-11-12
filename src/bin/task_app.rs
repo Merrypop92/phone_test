@@ -10,11 +10,16 @@ use super::app::{App, AppCommand, Task, MAX_TASKS, MAX_TITLE_BYTES};
 
 pub struct TaskApp {
     pub tasks: HeapVec<Task, MAX_TASKS>,
+    /// Vrai entre un `CLEAR` et sa confirmation par `OUI`.
+    clear_pending: bool,
 }
 
 impl TaskApp {
     pub fn new() -> Self {
-        Self { tasks: HeapVec::new() }
+        Self {
+            tasks: HeapVec::new(),
+            clear_pending: false,
+        }
     }
 
     /// Convertit un numero affiche (1..=len) en index du tableau.
@@ -23,6 +28,25 @@ impl TaskApp {
             Ok(n) if n > 0 && n <= self.tasks.len() => Some(n - 1),
             _ => None,
         }
+    }
+
+    fn done_count(&self) -> usize {
+        self.tasks.iter().filter(|task| task.done).count()
+    }
+
+    fn set_done(&mut self, argument: &str, done: bool, epd: &mut Epd, buf: &mut [u8]) -> AppCommand {
+        let Some(index) = self.parse_index(argument) else {
+            esp_println::println!("Usage : {} <numero de tache>", if done { "DONE" } else { "UNDO" });
+            return AppCommand::Stay;
+        };
+        self.tasks[index].done = done;
+        esp_println::println!(
+            "Tache {} {}.",
+            index + 1,
+            if done { "terminee" } else { "a faire" }
+        );
+        self.draw(epd, buf);
+        AppCommand::Stay
     }
 }
 
@@ -41,6 +65,21 @@ fn parse_title(text: &str) -> Option<HeapString<MAX_TITLE_BYTES>> {
     Some(title)
 }
 
+fn print_help() {
+    esp_println::println!("Commandes Taches :");
+    esp_println::println!("  ADD <texte>       ajouter une tache");
+    esp_println::println!("  ADD ! <texte>     ajouter une tache urgente (marquee !)");
+    esp_println::println!("  EDIT <n> <texte>  modifier le titre de la tache n");
+    esp_println::println!("  DONE <n>          marquer la tache n terminee");
+    esp_println::println!("  UNDO <n>          remettre la tache n a faire");
+    esp_println::println!("  URGENT <n>        marquer / demarquer la tache n comme urgente");
+    esp_println::println!("  DELETE <n>        supprimer la tache n");
+    esp_println::println!("  CLEAR             supprimer les taches terminees (demande OUI)");
+    esp_println::println!("  LIST              reafficher la liste (rafraichissement complet)");
+    esp_println::println!("  HELP              afficher cette aide");
+    esp_println::println!("  BACK              revenir au menu");
+}
+
 fn draw_tasks(epd: &mut Epd, buf: &mut [u8], tasks: &HeapVec<Task, MAX_TASKS>) {
     clear_full_buffer(buf);
     {
@@ -50,7 +89,20 @@ fn draw_tasks(epd: &mut Epd, buf: &mut [u8], tasks: &HeapVec<Task, MAX_TASKS>) {
             height: PX_HEIGHT,
         };
         let style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
-        let _ = Text::new("Taches (RAM)", Point::new(40, 70), style).draw(&mut target);
+
+        let done_count = tasks.iter().filter(|task| task.done).count();
+        let mut header = HeapString::<48>::new();
+        let _ = core::fmt::write(
+            &mut header,
+            format_args!(
+                "Taches {}/{} - {} faite{} (RAM)",
+                tasks.len(),
+                MAX_TASKS,
+                done_count,
+                if done_count > 1 { "s" } else { "" }
+            ),
+        );
+        let _ = Text::new(header.as_str(), Point::new(40, 70), style).draw(&mut target);
 
         if tasks.is_empty() {
             let _ = Text::new("Aucune tache. ADD <texte> pour commencer.", Point::new(40, 140), style)
@@ -62,9 +114,10 @@ fn draw_tasks(epd: &mut Epd, buf: &mut [u8], tasks: &HeapVec<Task, MAX_TASKS>) {
             let _ = core::fmt::write(
                 &mut label,
                 format_args!(
-                    "{}. [{}] {}",
+                    "{}. [{}] {}{}",
                     index + 1,
                     if task.done { "x" } else { " " },
+                    if task.urgent { "! " } else { "" },
                     task.title.as_str()
                 ),
             );
@@ -73,13 +126,13 @@ fn draw_tasks(epd: &mut Epd, buf: &mut [u8], tasks: &HeapVec<Task, MAX_TASKS>) {
         }
 
         let _ = Text::new(
-            "ADD | EDIT <n> | DONE/UNDO <n> | DELETE <n> | BACK",
+            "ADD [!] | DONE/UNDO | URGENT | CLEAR | HELP",
             Point::new(40, 465),
             style,
         )
         .draw(&mut target);
     }
-    epd.whitescreen_all(buf);
+    epd.show(buf);
 }
 
 impl App for TaskApp {
@@ -88,13 +141,47 @@ impl App for TaskApp {
     }
 
     fn handle_input(&mut self, input: &str, epd: &mut Epd, buf: &mut [u8]) -> AppCommand {
+        // Confirmation d'un CLEAR : OUI valide, toute autre saisie annule
+        // puis est traitee normalement.
+        if self.clear_pending {
+            self.clear_pending = false;
+            if input == "OUI" {
+                let before = self.tasks.len();
+                self.tasks.retain(|task| !task.done);
+                esp_println::println!("{} tache(s) supprimee(s).", before - self.tasks.len());
+                self.draw(epd, buf);
+                return AppCommand::Stay;
+            }
+            esp_println::println!("CLEAR annule.");
+        }
+
         if input == "BACK" {
             return AppCommand::BackToMenu;
         }
 
+        if input == "HELP" {
+            print_help();
+            return AppCommand::Stay;
+        }
+
         if input == "LIST" {
+            epd.request_full_refresh();
             self.draw(epd, buf);
             esp_println::println!("{} tache(s).", self.tasks.len());
+            return AppCommand::Stay;
+        }
+
+        if input == "CLEAR" {
+            let count = self.done_count();
+            if count == 0 {
+                esp_println::println!("Aucune tache terminee a supprimer.");
+                return AppCommand::Stay;
+            }
+            esp_println::println!(
+                "Supprimer {} tache(s) terminee(s) ? Tape OUI pour confirmer, autre chose pour annuler.",
+                count
+            );
+            self.clear_pending = true;
             return AppCommand::Stay;
         }
 
@@ -103,11 +190,20 @@ impl App for TaskApp {
                 esp_println::println!("Liste pleine ({} taches max).", MAX_TASKS);
                 return AppCommand::Stay;
             }
-            let Some(title) = parse_title(argument) else {
+            let argument = argument.trim_start();
+            let (urgent, text) = match argument.strip_prefix("! ") {
+                Some(text) => (true, text),
+                None => (false, argument),
+            };
+            let Some(title) = parse_title(text) else {
                 return AppCommand::Stay;
             };
-            if self.tasks.push(Task { title, done: false }).is_ok() {
-                esp_println::println!("Tache ajoutee ({}).", self.tasks.len());
+            if self.tasks.push(Task { title, done: false, urgent }).is_ok() {
+                esp_println::println!(
+                    "Tache{} ajoutee ({}).",
+                    if urgent { " urgente" } else { "" },
+                    self.tasks.len()
+                );
                 self.draw(epd, buf);
             }
             return AppCommand::Stay;
@@ -119,6 +215,22 @@ impl App for TaskApp {
 
         if let Some(argument) = input.strip_prefix("UNDO ") {
             return self.set_done(argument, false, epd, buf);
+        }
+
+        if let Some(argument) = input.strip_prefix("URGENT ") {
+            let Some(index) = self.parse_index(argument) else {
+                esp_println::println!("Usage : URGENT <numero de tache>");
+                return AppCommand::Stay;
+            };
+            let task = &mut self.tasks[index];
+            task.urgent = !task.urgent;
+            esp_println::println!(
+                "Tache {} {}.",
+                index + 1,
+                if task.urgent { "marquee urgente" } else { "n'est plus urgente" }
+            );
+            self.draw(epd, buf);
+            return AppCommand::Stay;
         }
 
         if let Some(arguments) = input.strip_prefix("EDIT ") {
@@ -150,26 +262,7 @@ impl App for TaskApp {
             return AppCommand::Stay;
         }
 
-        esp_println::println!(
-            "Commande inconnue. Utilise ADD, EDIT, DONE, UNDO, DELETE, LIST ou BACK."
-        );
-        AppCommand::Stay
-    }
-}
-
-impl TaskApp {
-    fn set_done(&mut self, argument: &str, done: bool, epd: &mut Epd, buf: &mut [u8]) -> AppCommand {
-        let Some(index) = self.parse_index(argument) else {
-            esp_println::println!("Usage : {} <numero de tache>", if done { "DONE" } else { "UNDO" });
-            return AppCommand::Stay;
-        };
-        self.tasks[index].done = done;
-        esp_println::println!(
-            "Tache {} {}.",
-            index + 1,
-            if done { "terminee" } else { "a faire" }
-        );
-        self.draw(epd, buf);
+        esp_println::println!("Commande inconnue. Tape HELP pour la liste des commandes.");
         AppCommand::Stay
     }
 }

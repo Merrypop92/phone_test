@@ -86,7 +86,7 @@ impl App for CalculatorApp {
             let _ = Text::new("Exemple : 12 + 3 | CLEAR | BACK", Point::new(40, 440), style)
                 .draw(&mut target);
         }
-        epd.whitescreen_all(buf);
+        epd.show(buf);
     }
 
     fn handle_input(&mut self, input: &str, epd: &mut Epd, buf: &mut [u8]) -> AppCommand {

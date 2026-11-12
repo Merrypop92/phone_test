@@ -19,6 +19,10 @@ pub const PX_WIDTH: u32 = 800;
 pub const PX_HEIGHT: u32 = 480;
 pub const BUF_SIZE: usize = (PX_WIDTH as usize * PX_HEIGHT as usize) / 8;
 
+/// Nombre de rafraichissements partiels avant un rafraichissement complet force.
+/// Le partiel laisse des traces (ghosting) qui s'accumulent ; un complet les efface.
+pub const PARTIAL_REFRESH_LIMIT: u8 = 10;
+
 /// Driver SSD1677 minimal, port 1:1 des fonctions EPD_* du driver C de reference.
 pub struct Epd<'d> {
     spi: Spi<'d, Blocking>,
@@ -26,11 +30,40 @@ pub struct Epd<'d> {
     dc: Output<'d>,
     rst: Output<'d>,
     busy: Input<'d>,
+    /// Rafraichissements partiels depuis le dernier complet.
+    partial_count: u8,
+    /// Vrai si le prochain `show()` doit etre un rafraichissement complet.
+    full_pending: bool,
 }
 
 impl<'d> Epd<'d> {
     pub fn new(spi: Spi<'d, Blocking>, cs: Output<'d>, dc: Output<'d>, rst: Output<'d>, busy: Input<'d>) -> Self {
-        Self { spi, cs, dc, rst, busy }
+        Self { spi, cs, dc, rst, busy, partial_count: 0, full_pending: true }
+    }
+
+    /// Demande que le prochain `show()` fasse un rafraichissement complet
+    /// (changement d'ecran, nettoyage des traces).
+    pub fn request_full_refresh(&mut self) {
+        self.full_pending = true;
+    }
+
+    /// Affiche un buffer plein ecran en choisissant le mode de rafraichissement :
+    /// - complet (lent, clignote) si demande, au premier affichage, ou apres
+    ///   PARTIAL_REFRESH_LIMIT partiels ; il pose aussi le fond de reference
+    ///   (RAM 0x24 + 0x26) indispensable au partiel ;
+    /// - partiel (rapide, sans clignotement) sinon.
+    pub fn show(&mut self, buf: &[u8]) {
+        if self.full_pending || self.partial_count >= PARTIAL_REFRESH_LIMIT {
+            let mut delay = Delay::new();
+            self.hw_init(&mut delay);
+            self.set_ram_value_basemap(buf);
+            self.full_pending = false;
+            self.partial_count = 0;
+        } else {
+            self.dis_part_ram(0, 0, buf, PX_WIDTH, PX_HEIGHT);
+            self.part_update();
+            self.partial_count += 1;
+        }
     }
 
     fn write_cmd(&mut self, cmd: u8) {

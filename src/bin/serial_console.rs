@@ -85,7 +85,7 @@ fn main() -> ! {
                             esp_println::println!("Messages : texte libre ou BACK.");
                         }
                         AppCommand::OpenTasks => {
-                            esp_println::println!("Taches : ADD <texte>, EDIT <n> <texte>, DONE <n>, UNDO <n>, DELETE <n>, LIST ou BACK.");
+                            esp_println::println!("Taches : ADD [!] <texte>, DONE <n>, CLEAR... Tape HELP pour toutes les commandes.");
                         }
                         AppCommand::OpenCalculator => {
                             esp_println::println!("Calculatrice : expression (ex. 12 + 3), CLEAR ou BACK.");

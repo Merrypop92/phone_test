@@ -7,6 +7,7 @@ pub const MAX_TITLE_BYTES: usize = 48;
 pub struct Task {
     pub title: HeapString<MAX_TITLE_BYTES>,
     pub done: bool,
+    pub urgent: bool,
 }
 
 pub enum AppCommand {
@@ -109,6 +110,7 @@ impl ActiveApp {
             AppCommand::OpenTasks => ActiveScreen::Tasks,
             AppCommand::OpenCalculator => ActiveScreen::Calculator,
         };
+        epd.request_full_refresh();
         self.draw(epd, buf);
     }
 }

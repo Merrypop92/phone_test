@@ -32,7 +32,7 @@ fn draw_message(epd: &mut Epd, buf: &mut [u8], message: &str) {
         let _ = Text::new("Message recu :", Point::new(40, 100), style).draw(&mut target);
         let _ = Text::new(message, Point::new(40, 160), style).draw(&mut target);
     }
-    epd.whitescreen_all(buf);
+    epd.show(buf);
 }
 
 impl App for MessageApp {

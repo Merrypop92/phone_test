@@ -41,7 +41,7 @@ fn draw_menu(epd: &mut Epd, buf: &mut [u8], selected: usize, items: [&str; 3]) {
             let _ = Text::new(label, Point::new(50, y), style).draw(&mut target);
         }
     }
-    epd.whitescreen_all(buf);
+    epd.show(buf);
 }
 
 impl App for MenuApp {
@@ -63,6 +63,7 @@ impl App for MenuApp {
             }
             "ENTER" => self.controller.selected_app(),
             "BACK" => {
+                epd.request_full_refresh();
                 self.draw(epd, buf);
                 AppCommand::Stay
             }
