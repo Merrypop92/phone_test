@@ -18,6 +18,11 @@ pub const BUF_SIZE: usize = (PX_WIDTH as usize * PX_HEIGHT as usize) / 8;
 /// Le partiel laisse des traces (ghosting) qui s'accumulent ; un complet les efface.
 pub const PARTIAL_REFRESH_LIMIT: u8 = 10;
 
+/// Limite utilisee par `show_live()` (affichages qui changent chaque seconde :
+/// chrono, minuteur). Plus haute pour eviter un clignotement toutes les 10 s ;
+/// a 1 Hz, cela fait un rafraichissement complet toutes les 2 minutes environ.
+pub const LIVE_PARTIAL_REFRESH_LIMIT: u8 = 120;
+
 /// Driver SSD1677 minimal, port 1:1 des fonctions EPD_* du driver C de reference.
 pub struct Epd<'d> {
     spi: Spi<'d, Blocking>,
@@ -48,7 +53,19 @@ impl<'d> Epd<'d> {
     ///   (RAM 0x24 + 0x26) indispensable au partiel ;
     /// - partiel (rapide, sans clignotement) sinon.
     pub fn show(&mut self, buf: &[u8]) {
-        if self.full_pending || self.partial_count >= PARTIAL_REFRESH_LIMIT {
+        self.show_with_limit(buf, PARTIAL_REFRESH_LIMIT);
+    }
+
+    /// Comme `show()`, mais pour un affichage qui change en continu (chaque
+    /// seconde) : tolere LIVE_PARTIAL_REFRESH_LIMIT partiels avant un complet.
+    /// Les traces s'accumulent davantage ; le prochain `show()` normal fera un
+    /// rafraichissement complet si la limite normale est depassee.
+    pub fn show_live(&mut self, buf: &[u8]) {
+        self.show_with_limit(buf, LIVE_PARTIAL_REFRESH_LIMIT);
+    }
+
+    fn show_with_limit(&mut self, buf: &[u8], limit: u8) {
+        if self.full_pending || self.partial_count >= limit {
             let mut delay = Delay::new();
             self.hw_init(&mut delay);
             self.set_ram_value_basemap(buf);
@@ -57,7 +74,7 @@ impl<'d> Epd<'d> {
         } else {
             self.dis_part_ram(0, 0, buf, PX_WIDTH, PX_HEIGHT);
             self.part_update();
-            self.partial_count += 1;
+            self.partial_count = self.partial_count.saturating_add(1);
         }
     }
 
@@ -72,6 +89,16 @@ impl<'d> Epd<'d> {
         self.cs.set_low();
         self.dc.set_high(); // D/C# 1:data
         let _ = self.spi.write(&[data]);
+        self.cs.set_high();
+    }
+
+    /// Envoie un bloc de donnees en une seule transaction SPI (CS bas une fois).
+    /// Le driver C de reference basculait CS a chaque octet, ce qui est tres lent
+    /// pour les 48 000 octets d'une image ; le SSD1677 accepte un flux continu.
+    fn write_data_bulk(&mut self, data: &[u8]) {
+        self.cs.set_low();
+        self.dc.set_high(); // D/C# 1:data
+        let _ = self.spi.write(data);
         self.cs.set_high();
     }
 
@@ -192,18 +219,14 @@ impl<'d> Epd<'d> {
     /// Port de EPD_WhiteScreen_ALL() : envoie un buffer complet puis rafraichit.
     pub fn whitescreen_all(&mut self, data: &[u8]) {
         self.write_cmd(0x24); // write RAM, noir(0)/blanc(1)
-        for &b in data {
-            self.write_data(b);
-        }
+        self.write_data_bulk(data);
         self.update();
     }
 
     /// Port de EPD_WhiteScreen_ALL_Fast().
     pub fn whitescreen_all_fast(&mut self, data: &[u8]) {
         self.write_cmd(0x24);
-        for &b in data {
-            self.write_data(b);
-        }
+        self.write_data_bulk(data);
         self.update_fast();
     }
 
@@ -211,13 +234,9 @@ impl<'d> Epd<'d> {
     /// rafraichissement partiel (a appeler apres hw_init(), avant les dis_part_ram()).
     pub fn set_ram_value_basemap(&mut self, data: &[u8]) {
         self.write_cmd(0x24);
-        for &b in data {
-            self.write_data(b);
-        }
+        self.write_data_bulk(data);
         self.write_cmd(0x26);
-        for &b in data {
-            self.write_data(b);
-        }
+        self.write_data_bulk(data);
         self.update();
     }
 
@@ -256,9 +275,7 @@ impl<'d> Epd<'d> {
         self.write_data((y_start / 256) as u8);
 
         self.write_cmd(0x24);
-        for &b in data {
-            self.write_data(b);
-        }
+        self.write_data_bulk(data);
     }
 
     /// Port de EPD_Dis_Part() : comme dis_part_ram() mais fait le reset + declenche

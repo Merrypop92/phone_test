@@ -176,6 +176,23 @@ fn uptime_secs() -> u64 {
     Instant::now().duration_since_epoch().as_secs()
 }
 
+/// Millisecondes ecoulees depuis le demarrage (compteur monotone, toujours
+/// disponible meme si l'heure n'est pas reglee). Pour chronometres et minuteurs.
+pub fn uptime_ms() -> u64 {
+    Instant::now().duration_since_epoch().as_millis()
+}
+
+/// Heure locale du PC au moment de la compilation (fournie par build.rs).
+pub const BUILD_TIME: &str = env!("DOCPHONE_BUILD_TIME");
+
+/// Regle l'horloge sur l'heure de compilation (solution de depannage tant
+/// qu'il n'y a pas de RTC). Renvoie l'heure posee.
+pub fn set_to_build_time() -> Option<DateTime> {
+    let build_time = DateTime::parse(BUILD_TIME)?;
+    set(build_time);
+    Some(build_time)
+}
+
 /// Regle l'heure courante.
 pub fn set(now: DateTime) {
     let reference = (now.to_secs(), uptime_secs());

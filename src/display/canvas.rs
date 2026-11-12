@@ -67,6 +67,23 @@ impl FrameBuffer<'_> {
         let x = self.width as i32 - margin - text.len() as i32 * CHAR_WIDTH;
         self.text(text, x, y);
     }
+
+    /// Ecrit `text` centre horizontalement.
+    pub fn text_centered(&mut self, text: &str, y: i32) {
+        let x = (self.width as i32 - text.len() as i32 * CHAR_WIDTH) / 2;
+        self.text(text, x, y);
+    }
+
+    /// Ecrit `text` agrandi `factor` fois (caracteres de 10*factor x 20*factor px),
+    /// centre horizontalement ; `y` = ligne de base, en pixels ecran.
+    pub fn text_big_centered(&mut self, text: &str, y: i32, factor: u32) {
+        let f = factor as i32;
+        let x = (self.width as i32 - text.len() as i32 * CHAR_WIDTH * f) / 2;
+        let style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
+        let mut scaled = Scaled { target: self, factor };
+        // Scaled multiplie les coordonnees par `factor` : on les divise ici.
+        let _ = Text::new(text, Point::new(x / f, y / f), style).draw(&mut scaled);
+    }
 }
 
 /// Remplit `buf` (plein ecran) en blanc.

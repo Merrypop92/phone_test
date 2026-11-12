@@ -1,4 +1,5 @@
 fn main() {
+    emit_build_time();
     linker_be_nice();
     // make sure linkall.x is the last linker script (otherwise might cause problems with flip-link)
     println!("cargo:rustc-link-arg=-Tlinkall.x");
@@ -67,4 +68,22 @@ fn linker_be_nice() {
         "cargo:rustc-link-arg=-Wl,--error-handling-script={}",
         std::env::current_exe().unwrap().display()
     );
+}
+
+/// Fournit au programme l'heure locale du PC au moment de la compilation
+/// (variable DOCPHONE_BUILD_TIME, "AAAA-MM-JJ HH:MM:SS") : l'horloge du
+/// DocPhone demarre dessus tant qu'il n'y a pas de RTC.
+fn emit_build_time() {
+    let now = std::process::Command::new("date")
+        .arg("+%Y-%m-%d %H:%M:%S")
+        .output()
+        .ok()
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .map(|text| text.trim().to_string())
+        .filter(|text| text.len() == 19)
+        .unwrap_or_else(|| "2026-01-01 00:00:00".to_string());
+    println!("cargo:rustc-env=DOCPHONE_BUILD_TIME={now}");
+    // Fichier inexistant : force cargo a relancer ce script a chaque compilation,
+    // pour que l'heure soit toujours celle du dernier `cargo run`.
+    println!("cargo:rerun-if-changed=.force-rerun-build-time");
 }

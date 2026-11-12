@@ -41,8 +41,9 @@ Version actuelle :
       commande serie TIME et perdue a chaque redemarrage.
 
 A corriger sur le schema / PCB (matrice de boutons TCA8418, U11) :
-- [ ] VCC (broche 21) semble relie seulement a C_13, pas au 3V3 : a verifier
-      (expliquerait que la puce ne reponde pas en I2C, cf. examples/i2c_scan.rs)
+- [ ] VCC (broche 21) n'est relie qu'a C_13, pas au 3V3 (confirme) : la puce
+      n'est pas alimentee, d'ou l'absence de reponse I2C. Ajouter la liaison
+      VCC -> 3V3 (sur cette carte : un fil ; verifier avec examples/i2c_scan.rs)
 - [ ] R_9 (10 kOhm) est en serie sur INT# : la mettre en pull-up entre INT# et 3V3
       (contourne en logiciel par le pull-up interne de GPIO25)
 

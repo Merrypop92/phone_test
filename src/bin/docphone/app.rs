@@ -21,6 +21,9 @@ pub enum AppCommand {
     Redraw,
     /// Redessiner avec un rafraichissement complet (efface les traces).
     FullRedraw,
+    /// Redessiner un affichage qui change chaque seconde (chrono, minuteur) :
+    /// partiel, avec beaucoup moins de rafraichissements complets.
+    LiveRedraw,
     /// Revenir au menu.
     BackToMenu,
     /// Ouvrir l'app numero i du registre (utilise par le menu).
@@ -39,6 +42,13 @@ pub trait App {
 
     /// Traite une entree (touche ou texte). `Key::Back` doit ramener au menu.
     fn handle_input(&mut self, input: Input) -> AppCommand;
+
+    /// Appele regulierement (environ 5 fois par seconde), que l'app soit
+    /// affichee ou non. Renvoyer `Redraw` quand l'affichage doit changer ; ce
+    /// n'est pris en compte que si l'app est affichee. Par defaut : rien.
+    fn tick(&mut self) -> AppCommand {
+        AppCommand::Stay
+    }
 }
 
 /// Gere la navigation entre le menu et les apps, et l'affichage. Les apps
@@ -61,7 +71,7 @@ impl<'a, 'd> Launcher<'a, 'd> {
             display,
             current: None,
         };
-        launcher.redraw();
+        launcher.refresh(Refresh::Full);
         launcher
     }
 
@@ -75,42 +85,82 @@ impl<'a, 'd> Launcher<'a, 'd> {
         };
 
         match command {
-            AppCommand::Stay => {}
-            AppCommand::Redraw => self.redraw(),
-            AppCommand::FullRedraw => {
-                self.display.request_full_refresh();
-                self.redraw();
-            }
             AppCommand::BackToMenu => self.open(None),
             AppCommand::Open(index) if index < self.apps.len() => self.open(Some(index)),
-            AppCommand::Open(_) => {}
+            other => {
+                if let Some(refresh) = Refresh::from_command(&other) {
+                    self.refresh(refresh);
+                }
+            }
         }
     }
 
-    /// Apres un reglage de l'heure : redessine le menu s'il est affiche
-    /// (c'est le seul ecran qui montre l'heure pour l'instant).
-    pub fn on_time_changed(&mut self) {
-        if self.current.is_none() {
-            self.redraw();
+    /// A appeler regulierement : laisse le menu et toutes les apps se mettre a
+    /// jour (horloge, minuteur...) et redessine l'ecran affiche si besoin.
+    pub fn tick(&mut self) {
+        // Toutes les apps sont appelees (un minuteur doit pouvoir sonner hors de
+        // son app), mais seul l'ecran affiche est redessine.
+        let menu_command = self.menu.tick();
+        let mut refresh = match self.current {
+            None => Refresh::from_command(&menu_command),
+            Some(_) => None,
+        };
+
+        for (index, app) in self.apps.iter_mut().enumerate() {
+            let command = app.tick();
+            if self.current == Some(index) {
+                refresh = refresh.max(Refresh::from_command(&command));
+            }
+        }
+
+        if let Some(refresh) = refresh {
+            self.refresh(refresh);
         }
     }
 
     /// Change d'ecran (`None` = menu) avec un rafraichissement complet.
     fn open(&mut self, target: Option<usize>) {
         self.current = target;
-        self.display.request_full_refresh();
-        self.redraw();
+        self.refresh(Refresh::Full);
         if let Some(index) = target {
             esp_println::println!("{} : {}", self.apps[index].name(), self.apps[index].intro());
         }
     }
 
     /// Dessine l'ecran courant et l'envoie a l'ecran.
-    fn redraw(&mut self) {
+    fn refresh(&mut self, refresh: Refresh) {
         let Self { apps, menu, display, current } = self;
-        display.draw(|canvas| match *current {
+        let render = |canvas: &mut FrameBuffer| match *current {
             None => menu.render(canvas, apps.iter().map(|app| app.name())),
             Some(index) => apps[index].render(canvas),
-        });
+        };
+        match refresh {
+            Refresh::Live => display.draw_live(render),
+            Refresh::Normal => display.draw(render),
+            Refresh::Full => {
+                display.request_full_refresh();
+                display.draw(render);
+            }
+        }
+    }
+}
+
+/// Type de rafraichissement, du plus leger au plus complet (l'ordre sert a
+/// garder le plus fort quand plusieurs demandes arrivent en meme temps).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Refresh {
+    Live,
+    Normal,
+    Full,
+}
+
+impl Refresh {
+    fn from_command(command: &AppCommand) -> Option<Self> {
+        match command {
+            AppCommand::LiveRedraw => Some(Refresh::Live),
+            AppCommand::Redraw => Some(Refresh::Normal),
+            AppCommand::FullRedraw => Some(Refresh::Full),
+            AppCommand::Stay | AppCommand::BackToMenu | AppCommand::Open(_) => None,
+        }
     }
 }

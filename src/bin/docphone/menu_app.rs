@@ -12,11 +12,26 @@ use super::app::AppCommand;
 /// le menu ne garde que la position de la selection.
 pub struct MenuApp {
     selected: usize,
+    /// Minute affichee dans l'en-tete (pour redessiner quand elle change).
+    shown_minute: Option<u64>,
 }
 
 impl MenuApp {
     pub fn new() -> Self {
-        Self { selected: 0 }
+        Self {
+            selected: 0,
+            shown_minute: None,
+        }
+    }
+
+    /// Redessine quand la minute change (ou quand l'heure vient d'etre reglee).
+    pub fn tick(&mut self) -> AppCommand {
+        let minute = clock::now().map(|now| now.to_secs() / 60);
+        if minute == self.shown_minute {
+            return AppCommand::Stay;
+        }
+        self.shown_minute = minute;
+        AppCommand::Redraw
     }
 
     pub fn render<'n>(&self, canvas: &mut FrameBuffer, names: impl Iterator<Item = &'n str>) {

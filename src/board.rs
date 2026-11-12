@@ -101,8 +101,9 @@ macro_rules! board_console {
 // INT# : sur le schema, R_9 (10 kOhm) est EN SERIE entre INT# et GPIO25, sans
 // pull-up ; on active donc le pull-up interne de l'ESP32 (a corriger sur la
 // prochaine version du PCB : R_9 entre INT# et 3V3).
-// ATTENTION : sur le schema, VCC (broche 21) ne semble relie qu'a C_13 (100 nF),
-// pas au 3V3 -> a verifier si la puce ne repond pas (cf. examples/i2c_scan.rs).
+// ATTENTION : sur le schema, VCC (broche 21) n'est relie qu'a C_13 (100 nF), pas
+// au 3V3 (confirme) : la puce n'est pas alimentee tant que la liaison VCC -> 3V3
+// n'est pas ajoutee. Verifier ensuite avec examples/i2c_scan.rs.
 // ---------------------------------------------------------------------------
 
 /// Adresse I2C du TCA8418.
