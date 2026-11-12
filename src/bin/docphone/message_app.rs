@@ -1,9 +1,4 @@
-use embedded_graphics::mono_font::MonoTextStyle;
-use embedded_graphics::mono_font::ascii::FONT_10X20;
-use embedded_graphics::pixelcolor::BinaryColor;
-use embedded_graphics::prelude::*;
-use embedded_graphics::text::Text;
-use esp32_quick::{Epd, FrameBuffer, PX_HEIGHT, PX_WIDTH, clear_full_buffer};
+use esp32_quick::FrameBuffer;
 use heapless::String as HeapString;
 
 use super::app::{App, AppCommand};
@@ -20,21 +15,6 @@ impl MessageApp {
     }
 }
 
-fn draw_message(epd: &mut Epd, buf: &mut [u8], message: &str) {
-    clear_full_buffer(buf);
-    {
-        let mut target = FrameBuffer {
-            buf,
-            width: PX_WIDTH,
-            height: PX_HEIGHT,
-        };
-        let style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
-        let _ = Text::new("Message recu :", Point::new(40, 100), style).draw(&mut target);
-        let _ = Text::new(message, Point::new(40, 160), style).draw(&mut target);
-    }
-    epd.show(buf);
-}
-
 impl App for MessageApp {
     fn name(&self) -> &'static str {
         "Messages"
@@ -44,23 +24,23 @@ impl App for MessageApp {
         "texte libre ou BACK."
     }
 
-    fn draw(&mut self, epd: &mut Epd, buf: &mut [u8]) {
+    fn render(&self, canvas: &mut FrameBuffer) {
+        canvas.text("Message recu :", 40, 100);
         if self.last_message.is_empty() {
-            draw_message(epd, buf, "Tape un texte puis Entree");
+            canvas.text("Tape un texte puis Entree", 40, 160);
         } else {
-            draw_message(epd, buf, self.last_message.as_str());
+            canvas.text(self.last_message.as_str(), 40, 160);
         }
     }
 
-    fn handle_input(&mut self, input: &str, epd: &mut Epd, buf: &mut [u8]) -> AppCommand {
+    fn handle_input(&mut self, input: &str) -> AppCommand {
         if input == "BACK" {
             return AppCommand::BackToMenu;
         }
 
         self.last_message.clear();
         let _ = self.last_message.push_str(input);
-        self.draw(epd, buf);
         esp_println::println!("Affichage e-paper: {input}");
-        AppCommand::Stay
+        AppCommand::Redraw
     }
 }

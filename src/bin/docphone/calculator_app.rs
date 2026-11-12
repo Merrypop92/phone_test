@@ -1,9 +1,4 @@
-use embedded_graphics::mono_font::MonoTextStyle;
-use embedded_graphics::mono_font::ascii::FONT_10X20;
-use embedded_graphics::pixelcolor::BinaryColor;
-use embedded_graphics::prelude::*;
-use embedded_graphics::text::Text;
-use esp32_quick::{Epd, FrameBuffer, PX_HEIGHT, PX_WIDTH, clear_full_buffer};
+use esp32_quick::FrameBuffer;
 use heapless::String as HeapString;
 
 use super::app::{App, AppCommand};
@@ -78,39 +73,26 @@ impl App for CalculatorApp {
         "expression (ex. 12 + 3), CLEAR ou BACK."
     }
 
-    fn draw(&mut self, epd: &mut Epd, buf: &mut [u8]) {
-        clear_full_buffer(buf);
-        {
-            let mut target = FrameBuffer {
-                buf,
-                width: PX_WIDTH,
-                height: PX_HEIGHT,
-            };
-            let style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
-            let _ = Text::new("Calculatrice", Point::new(40, 80), style).draw(&mut target);
-            let _ = Text::new("Entree :", Point::new(40, 150), style).draw(&mut target);
-            let _ = Text::new(self.expression.as_str(), Point::new(40, 190), style).draw(&mut target);
-            let _ = Text::new(self.result.as_str(), Point::new(40, 250), style).draw(&mut target);
-            let _ = Text::new("Exemple : 12 + 3 | CLEAR | BACK", Point::new(40, 440), style)
-                .draw(&mut target);
-        }
-        epd.show(buf);
+    fn render(&self, canvas: &mut FrameBuffer) {
+        canvas.text("Calculatrice", 40, 80);
+        canvas.text("Entree :", 40, 150);
+        canvas.text(self.expression.as_str(), 40, 190);
+        canvas.text(self.result.as_str(), 40, 250);
+        canvas.text("Exemple : 12 + 3 | CLEAR | BACK", 40, 440);
     }
 
-    fn handle_input(&mut self, input: &str, epd: &mut Epd, buf: &mut [u8]) -> AppCommand {
+    fn handle_input(&mut self, input: &str) -> AppCommand {
         match input {
             "BACK" => AppCommand::BackToMenu,
             "CLEAR" => {
                 self.expression.clear();
                 self.result.clear();
-                self.draw(epd, buf);
-                AppCommand::Stay
+                AppCommand::Redraw
             }
             _ => {
                 self.calculate(input);
-                self.draw(epd, buf);
                 esp_println::println!("{} = {}", self.expression.as_str(), self.result.as_str());
-                AppCommand::Stay
+                AppCommand::Redraw
             }
         }
     }
