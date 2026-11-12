@@ -16,6 +16,29 @@ impl TaskApp {
     pub fn new() -> Self {
         Self { tasks: HeapVec::new() }
     }
+
+    /// Convertit un numero affiche (1..=len) en index du tableau.
+    fn parse_index(&self, text: &str) -> Option<usize> {
+        match text.trim().parse::<usize>() {
+            Ok(n) if n > 0 && n <= self.tasks.len() => Some(n - 1),
+            _ => None,
+        }
+    }
+}
+
+/// Verifie qu'un titre n'est pas vide et tient dans MAX_TITLE_BYTES.
+fn parse_title(text: &str) -> Option<HeapString<MAX_TITLE_BYTES>> {
+    let text = text.trim();
+    if text.is_empty() {
+        esp_println::println!("Le texte ne peut pas etre vide.");
+        return None;
+    }
+    let mut title = HeapString::new();
+    if title.push_str(text).is_err() {
+        esp_println::println!("Titre trop long (max {} octets).", MAX_TITLE_BYTES);
+        return None;
+    }
+    Some(title)
 }
 
 fn draw_tasks(epd: &mut Epd, buf: &mut [u8], tasks: &HeapVec<Task, MAX_TASKS>) {
@@ -49,8 +72,12 @@ fn draw_tasks(epd: &mut Epd, buf: &mut [u8], tasks: &HeapVec<Task, MAX_TASKS>) {
             let _ = Text::new(label.as_str(), Point::new(40, y), style).draw(&mut target);
         }
 
-        let _ = Text::new("EDIT <n> <texte> | DELETE <n>", Point::new(40, 465), style)
-            .draw(&mut target);
+        let _ = Text::new(
+            "ADD | EDIT <n> | DONE/UNDO <n> | DELETE <n> | BACK",
+            Point::new(40, 465),
+            style,
+        )
+        .draw(&mut target);
     }
     epd.whitescreen_all(buf);
 }
@@ -71,93 +98,78 @@ impl App for TaskApp {
             return AppCommand::Stay;
         }
 
-        if input.starts_with("ADD ") {
-            let title = input[4..].trim();
-            if title.is_empty() {
-                esp_println::println!("Usage : ADD <texte>");
-                return AppCommand::Stay;
-            }
-            if title.len() > MAX_TITLE_BYTES {
-                esp_println::println!("Titre trop long (max {} octets).", MAX_TITLE_BYTES);
-                return AppCommand::Stay;
-            }
+        if let Some(argument) = input.strip_prefix("ADD ") {
             if self.tasks.is_full() {
                 esp_println::println!("Liste pleine ({} taches max).", MAX_TASKS);
                 return AppCommand::Stay;
             }
-
-            let mut stored_title = HeapString::<MAX_TITLE_BYTES>::new();
-            if stored_title.push_str(title).is_ok()
-                && self.tasks.push(Task { title: stored_title, done: false }).is_ok()
-            {
+            let Some(title) = parse_title(argument) else {
+                return AppCommand::Stay;
+            };
+            if self.tasks.push(Task { title, done: false }).is_ok() {
                 esp_println::println!("Tache ajoutee ({}).", self.tasks.len());
                 self.draw(epd, buf);
             }
             return AppCommand::Stay;
         }
 
-        if input.starts_with("DONE ") {
-            match input[5..].trim().parse::<usize>() {
-                Ok(index) if index > 0 && index <= self.tasks.len() => {
-                    self.tasks[index - 1].done = true;
-                    esp_println::println!("Tache {} terminee.", index);
-                    self.draw(epd, buf);
-                    return AppCommand::Stay;
-                }
-                _ => {
-                    esp_println::println!("Usage : DONE <numero de tache>");
-                    return AppCommand::Stay;
-                }
-            }
+        if let Some(argument) = input.strip_prefix("DONE ") {
+            return self.set_done(argument, true, epd, buf);
+        }
+
+        if let Some(argument) = input.strip_prefix("UNDO ") {
+            return self.set_done(argument, false, epd, buf);
         }
 
         if let Some(arguments) = input.strip_prefix("EDIT ") {
-            let Some((number, title)) = arguments.split_once(' ') else {
+            let index = arguments
+                .split_once(' ')
+                .and_then(|(number, _)| self.parse_index(number));
+            let Some(index) = index else {
                 esp_println::println!("Usage : EDIT <numero> <nouveau texte>");
                 return AppCommand::Stay;
             };
-
-            let title = title.trim();
-            if title.is_empty() {
-                esp_println::println!("Le texte ne peut pas etre vide.");
+            let text = arguments.split_once(' ').map_or("", |(_, text)| text);
+            let Some(title) = parse_title(text) else {
                 return AppCommand::Stay;
-            }
-            if title.len() > MAX_TITLE_BYTES {
-                esp_println::println!("Titre trop long (max {} octets).", MAX_TITLE_BYTES);
-                return AppCommand::Stay;
-            }
-
-            match number.parse::<usize>() {
-                Ok(index) if index > 0 && index <= self.tasks.len() => {
-                    self.tasks[index - 1].title.clear();
-                    let _ = self.tasks[index - 1].title.push_str(title);
-                    esp_println::println!("Tache {} modifiee.", index);
-                    self.draw(epd, buf);
-                    return AppCommand::Stay;
-                }
-                _ => {
-                    esp_println::println!("Usage : EDIT <numero> <nouveau texte>");
-                    return AppCommand::Stay;
-                }
-            }
+            };
+            self.tasks[index].title = title;
+            esp_println::println!("Tache {} modifiee.", index + 1);
+            self.draw(epd, buf);
+            return AppCommand::Stay;
         }
 
-        if input.starts_with("DELETE ") {
-            match input[7..].trim().parse::<usize>() {
-                Ok(index) if index > 0 && index <= self.tasks.len() => {
-                    self.tasks.remove(index - 1);
-                    esp_println::println!("Tache {} supprimee.", index);
-                    self.draw(epd, buf);
-                    return AppCommand::Stay;
-                }
-                _ => {
-                    esp_println::println!("Usage : DELETE <numero de tache>");
-                    return AppCommand::Stay;
-                }
-            }
+        if let Some(argument) = input.strip_prefix("DELETE ") {
+            let Some(index) = self.parse_index(argument) else {
+                esp_println::println!("Usage : DELETE <numero de tache>");
+                return AppCommand::Stay;
+            };
+            self.tasks.remove(index);
+            esp_println::println!("Tache {} supprimee.", index + 1);
+            self.draw(epd, buf);
+            return AppCommand::Stay;
         }
 
-        esp_println::println!("Commande inconnue. Utilise ADD, EDIT, DONE, DELETE, LIST ou BACK.");
+        esp_println::println!(
+            "Commande inconnue. Utilise ADD, EDIT, DONE, UNDO, DELETE, LIST ou BACK."
+        );
+        AppCommand::Stay
+    }
+}
+
+impl TaskApp {
+    fn set_done(&mut self, argument: &str, done: bool, epd: &mut Epd, buf: &mut [u8]) -> AppCommand {
+        let Some(index) = self.parse_index(argument) else {
+            esp_println::println!("Usage : {} <numero de tache>", if done { "DONE" } else { "UNDO" });
+            return AppCommand::Stay;
+        };
+        self.tasks[index].done = done;
+        esp_println::println!(
+            "Tache {} {}.",
+            index + 1,
+            if done { "terminee" } else { "a faire" }
+        );
+        self.draw(epd, buf);
         AppCommand::Stay
     }
 }
