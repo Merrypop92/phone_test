@@ -8,20 +8,11 @@
 // RESET# du TCA8418 est cable directement sur 3V3 (pas de GPIO) : la puce est
 // donc toujours hors reset, pas besoin de la gerer ici.
 
-use esp_hal::gpio::{Input, InputConfig};
-use esp_hal::i2c::master::{Config as I2cConfig, I2c};
+use esp32_quick::board::{self, KEYPAD_I2C_ADDR as TCA8418_ADDR};
+use esp32_quick::board_keypad;
 use esp_hal::main;
-use esp_hal::time::{Duration, Instant, Rate};
-
-#[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    esp_println::println!("PANIC: {}", info);
-    loop {}
-}
 
 esp_bootloader_esp_idf::esp_app_desc!();
-
-const TCA8418_ADDR: u8 = 0x34;
 
 const REG_INT_STAT: u8 = 0x02;
 const REG_KEY_EVENT_A: u8 = 0x04;
@@ -30,11 +21,6 @@ const REG_KP_GPIO2: u8 = 0x1E;
 const REG_KP_GPIO3: u8 = 0x1F;
 
 const MAX_COLS: u8 = 10;
-
-fn delay_ms(ms: u64) {
-    let start = Instant::now();
-    while start.elapsed() < Duration::from_millis(ms) {}
-}
 
 /// Decode un octet KEY_EVENT_A en (pressed, row, col).
 /// Formule reprise telle quelle du driver kernel TCA8418 (le decalage sur col==0
@@ -60,17 +46,8 @@ fn main() -> ! {
 
     esp_println::println!("== Test matrice de boutons (TCA8418) ==");
 
-    let mut i2c = match I2c::new(peripherals.I2C0, I2cConfig::default().with_frequency(Rate::from_khz(100))) {
-        Ok(i2c) => i2c.with_sda(peripherals.GPIO21).with_scl(peripherals.GPIO22),
-        Err(e) => {
-            esp_println::println!("echec init I2C: {e:?}");
-            loop {
-                delay_ms(1000);
-            }
-        }
-    };
-
-    let kdb_int = Input::new(peripherals.GPIO25, InputConfig::default());
+    // Cablage (I2C0 SDA=GPIO21 SCL=GPIO22, INT#=GPIO25) : voir src/board.rs.
+    let (mut i2c, kdb_int) = board_keypad!(peripherals);
 
     // Active les 8 lignes (ROW0-7) et les 10 colonnes (COL0-9) comme matrice clavier.
     let mut ok = true;
@@ -121,6 +98,6 @@ fn main() -> ! {
             esp_println::println!("KDB_INT (GPIO25) = LOW (evenement en attente)");
         }
 
-        delay_ms(50);
+        board::delay_ms(50);
     }
 }

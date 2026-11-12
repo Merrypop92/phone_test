@@ -7,25 +7,12 @@ use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::text::Text;
-use esp32_quick::{Epd, FrameBuffer, PX_HEIGHT, PX_WIDTH, Scaled, clear_full_buffer};
+use esp32_quick::{FrameBuffer, PX_HEIGHT, PX_WIDTH, Scaled, board, board_display, clear_full_buffer};
 use esp_hal::clock::CpuClock;
 use esp_hal::delay::Delay;
-use esp_hal::gpio::{Input, InputConfig, Level, Output, OutputConfig};
 use esp_hal::main;
-use esp_hal::spi::Mode;
-use esp_hal::spi::master::{Config as SpiConfig, Spi};
-use esp_hal::time::Rate;
-
-#[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    esp_println::println!("PANIC: {}", info);
-    loop {}
-}
 
 esp_bootloader_esp_idf::esp_app_desc!();
-
-const BUF_SIZE: usize = (PX_WIDTH as usize * PX_HEIGHT as usize) / 8;
-static mut FRAME_BUFFER: [u8; BUF_SIZE] = [0xFF; BUF_SIZE];
 
 #[main]
 fn main() -> ! {
@@ -35,28 +22,9 @@ fn main() -> ! {
 
     esp_println::println!("== Init e-paper GDEQ0426T82 (SSD1677, port du driver C) ==");
 
-    // Bus SPI partage avec la carte SD sur cette carte : SCLK=GPIO18, MOSI=GPIO23.
-    let spi = Spi::new(
-        peripherals.SPI2,
-        SpiConfig::default()
-            .with_frequency(Rate::from_mhz(4))
-            .with_mode(Mode::_0),
-    )
-    .expect("echec init SPI")
-    .with_sck(peripherals.GPIO18)
-    .with_mosi(peripherals.GPIO23);
-
-    // Pins confirmees par le driver C de reference : CS=GPIO13, RST=GPIO12.
-    let cs = Output::new(peripherals.GPIO13, Level::High, OutputConfig::default());
-    let dc = Output::new(peripherals.GPIO2, Level::Low, OutputConfig::default());
-    let rst = Output::new(peripherals.GPIO12, Level::High, OutputConfig::default());
-    let busy = Input::new(peripherals.GPIO5, InputConfig::default());
-
-    let mut epd = Epd::new(spi, cs, dc, rst, busy);
-
-    // SAFETY: acces exclusif, une seule fois, pas d'autre reference concurrente ;
-    // on redessine/reutilise ce meme buffer entre chaque sequence.
-    let buf: &mut [u8] = unsafe { &mut *core::ptr::addr_of_mut!(FRAME_BUFFER) };
+    // Cablage de l'ecran : voir src/board.rs.
+    let mut epd = board_display!(peripherals);
+    let buf = board::frame_buffer();
 
     // --- 1. Rafraichissement complet : ecran blanc ---
     esp_println::println!("[1/4] Full refresh : ecran blanc");

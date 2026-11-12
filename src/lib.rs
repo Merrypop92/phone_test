@@ -6,6 +6,7 @@
 //! projet PlatformIO "indust"/"gooddisplay") vers Rust. On reste volontairement au plus
 //! pres de la sequence de registres eprouvee plutot que de passer par un crate tiers.
 
+pub mod board;
 pub mod clock;
 
 use embedded_graphics::pixelcolor::BinaryColor;

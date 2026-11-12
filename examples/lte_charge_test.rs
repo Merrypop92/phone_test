@@ -7,27 +7,15 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
-use esp_hal::analog::adc::{Adc, AdcConfig, Attenuation};
+use esp32_quick::board::delay_ms;
+use esp32_quick::{board_charge_status, board_lte};
 use esp_hal::clock::CpuClock;
-use esp_hal::gpio::{Level, Output, OutputConfig};
+use esp_hal::gpio::Level;
 use esp_hal::main;
-use esp_hal::time::{Duration, Instant};
-use esp_hal::uart::{Config as UartConfig, Uart};
-
-#[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    esp_println::println!("PANIC: {}", info);
-    loop {}
-}
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
-
-fn delay_ms(ms: u64) {
-    let start = Instant::now();
-    while start.elapsed() < Duration::from_millis(ms) {}
-}
 
 #[allow(
     clippy::large_stack_frames,
@@ -41,19 +29,10 @@ fn main() -> ! {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
-    // TP4056 STATUS/CHRG pin, cf. PaxOS-9 (PIN_BATTERY_CHARGING_STATUS = GPIO39 sur la
-    // PAXO v5). Validé sur cette carte : raw ~2950 en charge.
-    let mut adc_config = AdcConfig::new();
-    let mut charge_status_pin = adc_config.enable_pin(peripherals.GPIO39, Attenuation::_11dB);
-    let mut adc1 = Adc::new(peripherals.ADC1, adc_config);
-
-    // Module LTE (A7682E), cf. PaxOS-9 : PWRKEY=GPIO32, RX=GPIO26 (ESP <- module),
-    // TX=GPIO27 (ESP -> module). A confirmer/ajuster selon le schéma de cette carte.
-    let mut pwrkey = Output::new(peripherals.GPIO32, Level::Low, OutputConfig::default());
-    let mut lte_uart = Uart::new(peripherals.UART1, UartConfig::default())
-        .expect("échec init UART LTE")
-        .with_rx(peripherals.GPIO26)
-        .with_tx(peripherals.GPIO27);
+    // Detection de charge (TP4056 STATUS/CHRG sur GPIO39) et module LTE (A7682E,
+    // UART1 + PWRKEY) : cablage et notes dans src/board.rs.
+    let (mut adc1, mut charge_status_pin) = board_charge_status!(peripherals);
+    let (mut lte_uart, mut pwrkey) = board_lte!(peripherals);
 
     // --- Phase 1 : test PWRKEY mesurable au multimètre ---
     // Bascule GPIO32 lentement pour pouvoir sonder la grille et le drain de Q5.
