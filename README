@@ -1,3 +1,14 @@
 TODO:
 ajouter une led pour savoir si le telephone charge
 ajouter la sauvegarde persistante des taches sur carte SD (en attente d'une carte)
+
+BESOINS MATERIELS (version actuelle) :
+- LED de charge : indiquer si le telephone est en charge
+- accelerometre + gyroscope (centrale inertielle / IMU)
+- boutons de volume (+ / -)
+- RTC externe sur pile (ex. DS3231) : garder l'heure meme eteint ou apres un redemarrage
+  (en attendant : heure reglee a la main par la commande serie TIME, perdue au redemarrage)
+
+BESOINS MATERIELS (prochaine version) :
+- GPS (donnera aussi l'heure UTC precise)
+- ecran tactile a la place de la matrice de boutons

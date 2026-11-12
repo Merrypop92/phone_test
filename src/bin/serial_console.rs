@@ -16,6 +16,7 @@ use esp_hal::spi::master::{Config as SpiConfig, Spi};
 use esp_hal::time::Rate;
 use esp_hal::uart::{Config as UartConfig, Uart};
 
+use esp32_quick::clock::{self, DateTime};
 use esp32_quick::{Epd, PX_HEIGHT, PX_WIDTH};
 
 #[panic_handler]
@@ -63,6 +64,7 @@ fn main() -> ! {
     let mut current_app = ActiveApp::new();
     current_app.draw(&mut epd, buf);
     esp_println::println!("Menu pret : UP, DOWN, ENTER, BACK puis Entree.");
+    esp_println::println!("Heure non reglee : TIME AAAA-MM-JJ HH:MM (ex. TIME 2026-11-12 14:30).");
 
     let mut line = [0u8; 96];
     let mut length = 0usize;
@@ -78,6 +80,13 @@ fn main() -> ! {
                 if length > 0 {
                     let input = core::str::from_utf8(&line[..length])
                         .unwrap_or("Texte non UTF-8");
+
+                    // TIME est une commande globale, valable dans toutes les apps.
+                    if input == "TIME" || input.starts_with("TIME ") {
+                        handle_time_command(input[4..].trim(), &mut current_app, &mut epd, buf);
+                        length = 0;
+                        continue;
+                    }
 
                     let action = current_app.handle_input(input, &mut epd, buf);
                     match action {
@@ -106,5 +115,33 @@ fn main() -> ! {
             }
             Ok(_) | Err(_) => {}
         }
+    }
+}
+/// `TIME` affiche l'heure ; `TIME AAAA-MM-JJ HH:MM[:SS]` la regle.
+fn handle_time_command(argument: &str, current_app: &mut ActiveApp, epd: &mut Epd, buf: &mut [u8]) {
+    if argument.is_empty() {
+        match clock::now() {
+            Some(now) => esp_println::println!(
+                "{} {} (semaine {})",
+                now.weekday_name(),
+                now,
+                now.iso_week()
+            ),
+            None => esp_println::println!("Heure non reglee. Usage : TIME AAAA-MM-JJ HH:MM[:SS]"),
+        }
+        return;
+    }
+
+    match DateTime::parse(argument) {
+        Some(now) => {
+            clock::set(now);
+            esp_println::println!("Heure reglee : {} {}", now.weekday_name(), now);
+            current_app.on_time_changed(epd, buf);
+        }
+        None => esp_println::println!(
+            "Date invalide. Usage : TIME AAAA-MM-JJ HH:MM[:SS] (annees {} a {})",
+            clock::MIN_YEAR,
+            clock::MAX_YEAR
+        ),
     }
 }

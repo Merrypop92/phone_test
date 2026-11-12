@@ -102,6 +102,14 @@ impl ActiveApp {
         }
     }
 
+    /// Apres un reglage de l'heure : redessine le menu s'il est affiche
+    /// (c'est le seul ecran qui montre l'heure pour l'instant).
+    pub fn on_time_changed(&mut self, epd: &mut Epd, buf: &mut [u8]) {
+        if let ActiveScreen::Menu = self.screen {
+            self.draw(epd, buf);
+        }
+    }
+
     pub fn activate(&mut self, command: AppCommand, epd: &mut Epd, buf: &mut [u8]) {
         self.screen = match command {
             AppCommand::Stay => return,

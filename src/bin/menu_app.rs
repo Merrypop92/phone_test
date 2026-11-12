@@ -4,7 +4,10 @@ use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::text::Text;
+use esp32_quick::clock;
 use esp32_quick::{Epd, FrameBuffer, PX_HEIGHT, PX_WIDTH, clear_full_buffer};
+
+use heapless::String as HeapString;
 
 use super::app::{App, AppCommand, MenuController};
 
@@ -30,6 +33,29 @@ fn draw_menu(epd: &mut Epd, buf: &mut [u8], selected: usize, items: [&str; 3]) {
         };
         let style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
         let _ = Text::new("DocPhone", Point::new(40, 80), style).draw(&mut target);
+
+        // Date et heure en haut a droite, ou une invite si l'heure n'est pas reglee.
+        let mut header = HeapString::<48>::new();
+        match clock::now() {
+            Some(now) => {
+                let _ = core::fmt::write(
+                    &mut header,
+                    format_args!(
+                        "{} {} {} {:02}:{:02}",
+                        now.weekday_name(),
+                        now.day,
+                        now.month_name(),
+                        now.hour,
+                        now.minute
+                    ),
+                );
+            }
+            None => {
+                let _ = header.push_str("Heure ? TIME AAAA-MM-JJ HH:MM");
+            }
+        }
+        let header_x = PX_WIDTH as i32 - 40 - header.len() as i32 * 10;
+        let _ = Text::new(header.as_str(), Point::new(header_x, 80), style).draw(&mut target);
 
         for (index, label) in items.iter().enumerate() {
             let y = 170 + index as i32 * 70;
