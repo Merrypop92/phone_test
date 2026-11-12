@@ -8,7 +8,6 @@ mod message_app;
 mod task_app;
 
 use app::{ActiveApp, AppCommand};
-use calculator_app::CalculatorApp;
 use esp_hal::delay::Delay;
 use esp_hal::gpio::{Input, InputConfig, Level, Output, OutputConfig};
 use esp_hal::main;
@@ -18,9 +17,6 @@ use esp_hal::time::Rate;
 use esp_hal::uart::{Config as UartConfig, Uart};
 
 use esp32_quick::{Epd, PX_HEIGHT, PX_WIDTH};
-use menu_app::MenuApp;
-use message_app::MessageApp;
-use task_app::TaskApp;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -64,7 +60,7 @@ fn main() -> ! {
 
     epd.hw_init(&mut delay);
 
-    let mut current_app = ActiveApp::Menu(MenuApp::new());
+    let mut current_app = ActiveApp::new();
     current_app.draw(&mut epd, buf);
     esp_println::println!("Menu pret : UP, DOWN, ENTER, BACK puis Entree.");
 
@@ -85,27 +81,18 @@ fn main() -> ! {
 
                     let action = current_app.handle_input(input, &mut epd, buf);
                     match action {
-                        AppCommand::Stay => {}
-                        AppCommand::BackToMenu => {
-                            current_app = ActiveApp::Menu(MenuApp::new());
-                            current_app.draw(&mut epd, buf);
-                        }
                         AppCommand::OpenMessages => {
-                            current_app = ActiveApp::Messages(MessageApp::new());
-                            current_app.draw(&mut epd, buf);
                             esp_println::println!("Messages : texte libre ou BACK.");
                         }
                         AppCommand::OpenTasks => {
-                            current_app = ActiveApp::Tasks(TaskApp::new());
-                            current_app.draw(&mut epd, buf);
-                            esp_println::println!("Taches : ADD <texte>, DONE <n>, LIST ou BACK.");
+                            esp_println::println!("Taches : ADD <texte>, EDIT <n> <texte>, DONE <n>, DELETE <n>, LIST ou BACK.");
                         }
                         AppCommand::OpenCalculator => {
-                            current_app = ActiveApp::Calculator(CalculatorApp::new());
-                            current_app.draw(&mut epd, buf);
                             esp_println::println!("Calculatrice : expression (ex. 12 + 3), CLEAR ou BACK.");
                         }
+                        AppCommand::Stay | AppCommand::BackToMenu => {}
                     }
+                    current_app.activate(action, &mut epd, buf);
                     length = 0;
                 }
             }

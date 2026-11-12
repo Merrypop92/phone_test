@@ -49,7 +49,7 @@ fn draw_tasks(epd: &mut Epd, buf: &mut [u8], tasks: &HeapVec<Task, MAX_TASKS>) {
             let _ = Text::new(label.as_str(), Point::new(40, y), style).draw(&mut target);
         }
 
-        let _ = Text::new("ADD <texte> | DONE <n> | LIST | BACK", Point::new(40, 465), style)
+        let _ = Text::new("EDIT <n> <texte> | DELETE <n>", Point::new(40, 465), style)
             .draw(&mut target);
     }
     epd.whitescreen_all(buf);
@@ -111,7 +111,53 @@ impl App for TaskApp {
             }
         }
 
-        esp_println::println!("Commande inconnue. Utilise ADD, DONE, LIST ou BACK.");
+        if let Some(arguments) = input.strip_prefix("EDIT ") {
+            let Some((number, title)) = arguments.split_once(' ') else {
+                esp_println::println!("Usage : EDIT <numero> <nouveau texte>");
+                return AppCommand::Stay;
+            };
+
+            let title = title.trim();
+            if title.is_empty() {
+                esp_println::println!("Le texte ne peut pas etre vide.");
+                return AppCommand::Stay;
+            }
+            if title.len() > MAX_TITLE_BYTES {
+                esp_println::println!("Titre trop long (max {} octets).", MAX_TITLE_BYTES);
+                return AppCommand::Stay;
+            }
+
+            match number.parse::<usize>() {
+                Ok(index) if index > 0 && index <= self.tasks.len() => {
+                    self.tasks[index - 1].title.clear();
+                    let _ = self.tasks[index - 1].title.push_str(title);
+                    esp_println::println!("Tache {} modifiee.", index);
+                    self.draw(epd, buf);
+                    return AppCommand::Stay;
+                }
+                _ => {
+                    esp_println::println!("Usage : EDIT <numero> <nouveau texte>");
+                    return AppCommand::Stay;
+                }
+            }
+        }
+
+        if input.starts_with("DELETE ") {
+            match input[7..].trim().parse::<usize>() {
+                Ok(index) if index > 0 && index <= self.tasks.len() => {
+                    self.tasks.remove(index - 1);
+                    esp_println::println!("Tache {} supprimee.", index);
+                    self.draw(epd, buf);
+                    return AppCommand::Stay;
+                }
+                _ => {
+                    esp_println::println!("Usage : DELETE <numero de tache>");
+                    return AppCommand::Stay;
+                }
+            }
+        }
+
+        esp_println::println!("Commande inconnue. Utilise ADD, EDIT, DONE, DELETE, LIST ou BACK.");
         AppCommand::Stay
     }
 }

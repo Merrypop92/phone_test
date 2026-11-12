@@ -57,29 +57,58 @@ impl MenuController {
     }
 }
 
-pub enum ActiveApp {
-    Menu(super::menu_app::MenuApp),
-    Messages(super::message_app::MessageApp),
-    Tasks(super::task_app::TaskApp),
-    Calculator(super::calculator_app::CalculatorApp),
+enum ActiveScreen {
+    Menu,
+    Messages,
+    Tasks,
+    Calculator,
+}
+
+pub struct ActiveApp {
+    screen: ActiveScreen,
+    menu: super::menu_app::MenuApp,
+    messages: super::message_app::MessageApp,
+    tasks: super::task_app::TaskApp,
+    calculator: super::calculator_app::CalculatorApp,
 }
 
 impl ActiveApp {
+    pub fn new() -> Self {
+        Self {
+            screen: ActiveScreen::Menu,
+            menu: super::menu_app::MenuApp::new(),
+            messages: super::message_app::MessageApp::new(),
+            tasks: super::task_app::TaskApp::new(),
+            calculator: super::calculator_app::CalculatorApp::new(),
+        }
+    }
+
     pub fn draw(&mut self, epd: &mut Epd, buf: &mut [u8]) {
-        match self {
-            ActiveApp::Menu(app) => app.draw(epd, buf),
-            ActiveApp::Messages(app) => app.draw(epd, buf),
-            ActiveApp::Tasks(app) => app.draw(epd, buf),
-            ActiveApp::Calculator(app) => app.draw(epd, buf),
+        match self.screen {
+            ActiveScreen::Menu => self.menu.draw(epd, buf),
+            ActiveScreen::Messages => self.messages.draw(epd, buf),
+            ActiveScreen::Tasks => self.tasks.draw(epd, buf),
+            ActiveScreen::Calculator => self.calculator.draw(epd, buf),
         }
     }
 
     pub fn handle_input(&mut self, input: &str, epd: &mut Epd, buf: &mut [u8]) -> AppCommand {
-        match self {
-            ActiveApp::Menu(app) => app.handle_input(input, epd, buf),
-            ActiveApp::Messages(app) => app.handle_input(input, epd, buf),
-            ActiveApp::Tasks(app) => app.handle_input(input, epd, buf),
-            ActiveApp::Calculator(app) => app.handle_input(input, epd, buf),
+        match self.screen {
+            ActiveScreen::Menu => self.menu.handle_input(input, epd, buf),
+            ActiveScreen::Messages => self.messages.handle_input(input, epd, buf),
+            ActiveScreen::Tasks => self.tasks.handle_input(input, epd, buf),
+            ActiveScreen::Calculator => self.calculator.handle_input(input, epd, buf),
         }
+    }
+
+    pub fn activate(&mut self, command: AppCommand, epd: &mut Epd, buf: &mut [u8]) {
+        self.screen = match command {
+            AppCommand::Stay => return,
+            AppCommand::BackToMenu => ActiveScreen::Menu,
+            AppCommand::OpenMessages => ActiveScreen::Messages,
+            AppCommand::OpenTasks => ActiveScreen::Tasks,
+            AppCommand::OpenCalculator => ActiveScreen::Calculator,
+        };
+        self.draw(epd, buf);
     }
 }
