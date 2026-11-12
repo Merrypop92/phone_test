@@ -23,7 +23,8 @@ const BIG_FACTOR: u32 = 6;
 const BIG_Y: i32 = 300;
 
 /// Intervalle de mise a jour du chronometre en marche, en ms. En dessous de
-/// 1000, les dixiemes de seconde sont aussi affiches (essayer 333 pour ~3 Hz).
+/// 1000, les dixiemes de seconde sont aussi affiches. Minimum realiste : ~500 ms
+/// (rafraichissement partiel constructeur : 0,42 s, + ~0,1 s d'envoi SPI a 4 MHz).
 const STOPWATCH_REFRESH_MS: u64 = 1000;
 
 /// Duree maximale du minuteur, en minutes.
