@@ -21,7 +21,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use esp_hal::Blocking;
 use esp_hal::analog::adc::{Adc, AdcConfig, AdcPin, Attenuation};
-use esp_hal::gpio::{Input, InputConfig, Level, Output, OutputConfig};
+use esp_hal::gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull};
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::peripherals::{
     ADC1, GPIO1, GPIO2, GPIO3, GPIO5, GPIO12, GPIO13, GPIO18, GPIO21, GPIO22, GPIO23, GPIO25,
@@ -96,8 +96,13 @@ macro_rules! board_console {
 }
 
 // ---------------------------------------------------------------------------
-// Matrice de boutons TCA8418 (I2C0, 100 kHz) : SDA=GPIO21, SCL=GPIO22, INT#=GPIO25
-// RESET# du TCA8418 est cable sur 3V3 (pas de broche a gerer).
+// Matrice de boutons TCA8418 (U11, I2C0, 100 kHz) : SDA=GPIO21, SCL=GPIO22, INT#=GPIO25
+// Pull-ups SDA/SCL : 4,7 kOhm (R_7, R_8). RESET# : pull-up 10 kOhm vers 3V3 (R_6).
+// INT# : sur le schema, R_9 (10 kOhm) est EN SERIE entre INT# et GPIO25, sans
+// pull-up ; on active donc le pull-up interne de l'ESP32 (a corriger sur la
+// prochaine version du PCB : R_9 entre INT# et 3V3).
+// ATTENTION : sur le schema, VCC (broche 21) ne semble relie qu'a C_13 (100 nF),
+// pas au 3V3 -> a verifier si la puce ne repond pas (cf. examples/i2c_scan.rs).
 // ---------------------------------------------------------------------------
 
 /// Adresse I2C du TCA8418.
@@ -115,7 +120,7 @@ pub fn keypad(
         .expect("echec init I2C")
         .with_sda(sda)
         .with_scl(scl);
-    (i2c, Input::new(int, InputConfig::default()))
+    (i2c, Input::new(int, InputConfig::default().with_pull(Pull::Up)))
 }
 
 #[macro_export]
@@ -173,6 +178,12 @@ macro_rules! board_charge_status {
         $crate::board::charge_status($p.ADC1, $p.GPIO39)
     };
 }
+
+// ---------------------------------------------------------------------------
+// Autres broches du schema, pas encore utilisees par le logiciel :
+//   LED=GPIO14, VIBRATOR=GPIO33, SW_HOME=GPIO15 (bouton home),
+//   SD_CS=GPIO4 et SPI_MISO=GPIO19 (carte SD, sur le meme bus SPI que l'ecran).
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Tampon d'image plein ecran (48 Ko, 1 bit par pixel)

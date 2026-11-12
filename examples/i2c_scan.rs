@@ -75,9 +75,11 @@ fn main() -> ! {
             esp_println::println!("    {name} -> {verdict}");
         }
 
-        let int = Input::new(p.GPIO25.reborrow(), InputConfig::default());
+        // R_9 est en serie (pas de pull-up externe) : pull-up interne obligatoire.
+        let int = Input::new(p.GPIO25.reborrow(), up);
+        board::delay_ms(5);
         esp_println::println!(
-            "[1] INT# (GPIO25) = {} (HAUT attendu au repos)",
+            "[1] INT# (GPIO25, pull-up interne) = {} (HAUT attendu au repos ; BAS = puce qui signale un evenement ou court-circuit)",
             level(&int)
         );
     }
