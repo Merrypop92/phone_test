@@ -1,4 +1,5 @@
 use esp32_quick::FrameBuffer;
+use esp32_quick::input::{Input, Key};
 use heapless::String as HeapString;
 
 use super::app::{App, AppCommand};
@@ -81,15 +82,16 @@ impl App for CalculatorApp {
         canvas.text("Exemple : 12 + 3 | CLEAR | BACK", 40, 440);
     }
 
-    fn handle_input(&mut self, input: &str) -> AppCommand {
+    fn handle_input(&mut self, input: Input) -> AppCommand {
         match input {
-            "BACK" => AppCommand::BackToMenu,
-            "CLEAR" => {
+            Input::Key(Key::Back) => AppCommand::BackToMenu,
+            Input::Key(_) => AppCommand::Stay,
+            Input::Text("CLEAR") => {
                 self.expression.clear();
                 self.result.clear();
                 AppCommand::Redraw
             }
-            _ => {
+            Input::Text(input) => {
                 self.calculate(input);
                 esp_println::println!("{} = {}", self.expression.as_str(), self.result.as_str());
                 AppCommand::Redraw

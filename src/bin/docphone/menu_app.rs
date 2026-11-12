@@ -3,6 +3,7 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use esp32_quick::FrameBuffer;
 use esp32_quick::clock;
+use esp32_quick::input::{Input, Key};
 use heapless::String as HeapString;
 
 use super::app::AppCommand;
@@ -54,23 +55,23 @@ impl MenuApp {
         }
     }
 
-    pub fn handle_input<'n>(&mut self, input: &str, names: impl Iterator<Item = &'n str>) -> AppCommand {
+    pub fn handle_input<'n>(&mut self, input: Input, names: impl Iterator<Item = &'n str>) -> AppCommand {
         let count = names.count();
         if count == 0 {
             esp_println::println!("Aucune app enregistree.");
             return AppCommand::Stay;
         }
         match input {
-            "UP" => {
+            Input::Key(Key::Up) => {
                 self.selected = if self.selected == 0 { count - 1 } else { self.selected - 1 };
                 AppCommand::Redraw
             }
-            "DOWN" => {
+            Input::Key(Key::Down) => {
                 self.selected = (self.selected + 1) % count;
                 AppCommand::Redraw
             }
-            "ENTER" => AppCommand::Open(self.selected),
-            "BACK" => AppCommand::FullRedraw,
+            Input::Key(Key::Enter) => AppCommand::Open(self.selected),
+            Input::Key(Key::Back) => AppCommand::FullRedraw,
             _ => {
                 esp_println::println!("Menu : UP, DOWN, ENTER ou BACK.");
                 AppCommand::Stay

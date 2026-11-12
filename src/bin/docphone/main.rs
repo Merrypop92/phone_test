@@ -15,6 +15,7 @@ use esp_hal::main;
 
 use esp32_quick::clock::{self, DateTime};
 use esp32_quick::display::Display;
+use esp32_quick::input::Input;
 use esp32_quick::{board, board_console, board_display};
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -60,7 +61,7 @@ fn main() -> ! {
                         continue;
                     }
 
-                    launcher.handle_input(input);
+                    launcher.handle_input(Input::from_console_line(input));
                     length = 0;
                 }
             }

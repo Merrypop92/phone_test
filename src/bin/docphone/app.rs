@@ -9,6 +9,7 @@
 
 use esp32_quick::FrameBuffer;
 use esp32_quick::display::Display;
+use esp32_quick::input::Input;
 
 use super::menu_app::MenuApp;
 
@@ -36,7 +37,8 @@ pub trait App {
     /// Dessine l'ecran de l'app. Le tampon est deja vide (blanc).
     fn render(&self, canvas: &mut FrameBuffer);
 
-    fn handle_input(&mut self, input: &str) -> AppCommand;
+    /// Traite une entree (touche ou texte). `Key::Back` doit ramener au menu.
+    fn handle_input(&mut self, input: Input) -> AppCommand;
 }
 
 /// Gere la navigation entre le menu et les apps, et l'affichage. Les apps
@@ -63,7 +65,7 @@ impl<'a, 'd> Launcher<'a, 'd> {
         launcher
     }
 
-    pub fn handle_input(&mut self, input: &str) {
+    pub fn handle_input(&mut self, input: Input) {
         let command = match self.current {
             None => {
                 let names = self.apps.iter().map(|app| app.name());

@@ -1,4 +1,5 @@
 use esp32_quick::FrameBuffer;
+use esp32_quick::input::{Input, Key};
 use heapless::String as HeapString;
 
 use super::app::{App, AppCommand};
@@ -33,10 +34,12 @@ impl App for MessageApp {
         }
     }
 
-    fn handle_input(&mut self, input: &str) -> AppCommand {
-        if input == "BACK" {
-            return AppCommand::BackToMenu;
-        }
+    fn handle_input(&mut self, input: Input) -> AppCommand {
+        let input = match input {
+            Input::Key(Key::Back) => return AppCommand::BackToMenu,
+            Input::Key(_) => return AppCommand::Stay,
+            Input::Text(text) => text,
+        };
 
         self.last_message.clear();
         let _ = self.last_message.push_str(input);

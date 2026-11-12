@@ -1,4 +1,5 @@
 use esp32_quick::FrameBuffer;
+use esp32_quick::input::{Input, Key};
 use heapless::{String as HeapString, Vec as HeapVec};
 
 use super::app::{App, AppCommand};
@@ -129,12 +130,12 @@ impl App for TaskApp {
         canvas.text("ADD [!] | DONE/UNDO | URGENT | CLEAR | HELP", 40, 465);
     }
 
-    fn handle_input(&mut self, input: &str) -> AppCommand {
+    fn handle_input(&mut self, input: Input) -> AppCommand {
         // Confirmation d'un CLEAR : OUI valide, toute autre saisie annule
         // puis est traitee normalement.
         if self.clear_pending {
             self.clear_pending = false;
-            if input == "OUI" {
+            if input == Input::Text("OUI") {
                 let before = self.tasks.len();
                 self.tasks.retain(|task| !task.done);
                 esp_println::println!("{} tache(s) supprimee(s).", before - self.tasks.len());
@@ -143,9 +144,12 @@ impl App for TaskApp {
             esp_println::println!("CLEAR annule.");
         }
 
-        if input == "BACK" {
-            return AppCommand::BackToMenu;
-        }
+        let input = match input {
+            Input::Key(Key::Back) => return AppCommand::BackToMenu,
+            // Les autres touches ne servent pas encore ici (plus tard : selection d'une tache).
+            Input::Key(_) => return AppCommand::Stay,
+            Input::Text(text) => text,
+        };
 
         if input == "HELP" {
             print_help();

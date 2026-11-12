@@ -6,10 +6,12 @@
 //! - `board`   : cablage et initialisation du materiel
 //! - `display` : ecran e-paper, zone de dessin, `Display`
 //! - `clock`   : heure et date
+//! - `input`   : entrees utilisateur (touches, texte), independantes de leur source
 
 pub mod board;
 pub mod clock;
 pub mod display;
+pub mod input;
 
 // Raccourcis : `esp32_quick::Epd` plutot que `esp32_quick::display::Epd`.
 pub use display::{
