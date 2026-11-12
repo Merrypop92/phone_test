@@ -6,7 +6,7 @@ version      = "0.1.0"
 
 # Application principale. Les modules des apps sont dans src/bin/docphone/.
 # Les programmes de test du materiel sont dans examples/ :
-#   cargo run --example epaper_demo | keypad_test | lte_charge_test
+#   cargo run --example epaper_demo | keypad_test | i2c_scan | lte_charge_test
 [[bin]]
 name = "docphone"
 path = "./src/bin/docphone/main.rs"

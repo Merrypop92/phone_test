@@ -17,6 +17,7 @@ Programmes de test du materiel (dossier examples/) :
 
     cargo run --example epaper_demo      # modes de rafraichissement e-paper
     cargo run --example keypad_test      # matrice de boutons TCA8418
+    cargo run --example i2c_scan         # diagnostic du bus I2C / soudure du TCA8418
     cargo run --example lte_charge_test  # PWRKEY du module LTE + detection de charge (ADC)
 
 
