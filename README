@@ -1,14 +1,38 @@
-TODO:
-ajouter une led pour savoir si le telephone charge
-ajouter la sauvegarde persistante des taches sur carte SD (en attente d'une carte)
+DocPhone - prototype Rust (esp32-quick)
+=======================================
 
-BESOINS MATERIELS (version actuelle) :
-- LED de charge : indiquer si le telephone est en charge
-- accelerometre + gyroscope (centrale inertielle / IMU)
-- boutons de volume (+ / -)
-- RTC externe sur pile (ex. DS3231) : garder l'heure meme eteint ou apres un redemarrage
-  (en attendant : heure reglee a la main par la commande serie TIME, perdue au redemarrage)
+Telephone a ecran e-paper base sur un ESP32-WROVER-IE.
+Prototype en Rust no_std (esp-hal, embedded-graphics, heapless).
+Pour l'instant, l'ESP32 communique avec l'ordinateur par USB serie et
+l'ecran e-paper sert d'affichage.
 
-BESOINS MATERIELS (prochaine version) :
-- GPS (donnera aussi l'heure UTC precise)
-- ecran tactile a la place de la matrice de boutons
+
+Compiler et flasher
+-------------------
+
+    cargo check --bin serial-console     # verification
+    cargo run --bin serial-console       # flash + moniteur serie (espflash)
+
+
+A faire (logiciel)
+------------------
+
+- [ ] Sauvegarde persistante des taches sur carte SD
+      (en attente d'une carte SD ; ne pas ecrire en flash sans verifier
+      le partitionnement)
+
+
+Besoins materiels
+-----------------
+
+Version actuelle :
+- [ ] LED de charge : savoir si le telephone est en charge
+- [ ] Accelerometre + gyroscope (centrale inertielle)
+- [ ] Boutons de volume (+ / -)
+- [ ] RTC externe sur pile (ex. DS3231) : garder l'heure eteint ou apres
+      un redemarrage. En attendant, l'heure est reglee a la main avec la
+      commande serie TIME et perdue a chaque redemarrage.
+
+Prochaine version :
+- [ ] GPS (fournira aussi l'heure UTC precise)
+- [ ] Ecran tactile a la place de la matrice de boutons
