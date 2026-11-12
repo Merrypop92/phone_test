@@ -50,7 +50,10 @@ fn main() -> ! {
     esp_println::println!("Menu pret : UP, DOWN, ENTER, BACK puis Entree.");
 
     // Intervalle entre deux appels a launcher.tick() (horloge, minuteur...).
-    const TICK_MS: u64 = 200;
+    // Court pour que les mises a jour (bascule des palettes) demarrent toujours
+    // juste apres le changement de seconde ; un tick sans changement ne coute
+    // presque rien.
+    const TICK_MS: u64 = 20;
     let mut next_tick = 0u64;
 
     let mut line = [0u8; 96];

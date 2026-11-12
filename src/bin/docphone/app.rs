@@ -43,7 +43,7 @@ pub trait App {
     /// Traite une entree (touche ou texte). `Key::Back` doit ramener au menu.
     fn handle_input(&mut self, input: Input) -> AppCommand;
 
-    /// Appele regulierement (environ 5 fois par seconde), que l'app soit
+    /// Appele regulierement (toutes les 20 ms environ), que l'app soit
     /// affichee ou non. Renvoyer `Redraw` quand l'affichage doit changer ; ce
     /// n'est pris en compte que si l'app est affichee. Par defaut : rien.
     fn tick(&mut self) -> AppCommand {
