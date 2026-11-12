@@ -36,7 +36,8 @@ use crate::{BUF_SIZE, Epd};
 
 // ---------------------------------------------------------------------------
 // Ecran e-paper GDEQ0426T82 (SSD1677)
-// SPI2 : SCK=GPIO18, MOSI=GPIO23 (bus partage avec la carte SD)
+// SPI2 a 10 MHz (SSD1677 : jusqu'a 20 MHz en ecriture) : SCK=GPIO18,
+// MOSI=GPIO23 (bus partage avec la carte SD)
 // CS=GPIO13, DC=GPIO2, RST=GPIO12, BUSY=GPIO5 (confirmes par le driver C de reference)
 // ---------------------------------------------------------------------------
 
@@ -53,7 +54,7 @@ pub fn display(
     let spi = Spi::new(
         spi,
         SpiConfig::default()
-            .with_frequency(Rate::from_mhz(4))
+            .with_frequency(Rate::from_mhz(10))
             .with_mode(Mode::_0),
     )
     .expect("echec init SPI")

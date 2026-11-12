@@ -1,11 +1,14 @@
-//! App Horloge : heure en grand, chronometre et minuteur.
+//! App Horloge : heure, chronometre et minuteur, affiches facon panneau de gare
+//! a palettes (voir esp32_quick::display::flap).
 //!
-//! Chaque mode ne redessine que lorsque l'affichage change :
-//! - Horloge : chaque minute (rafraichissement partiel normal) ;
-//! - Chronometre et minuteur en marche : chaque seconde, en mode "live"
-//!   (`AppCommand::LiveRedraw` : partiel, avec beaucoup moins de
-//!   rafraichissements complets) ; STOP fait un rafraichissement complet pour
-//!   effacer les traces et afficher la valeur exacte (1/10 s pour le chrono).
+//! L'app memorise le texte affiche en palettes (`shown`, ex. "16:47"). Quand il
+//! change, elle affiche d'abord l'image a mi-bascule (haut = nouveau chiffre,
+//! bas = chiffre precedent), puis l'image finale au tick suivant.
+//! Mises a jour en mode "live" (`LiveRedraw`) :
+//! - Horloge : chaque minute ;
+//! - Chronometre et minuteur en marche : chaque seconde.
+//! STOP fait un rafraichissement complet pour effacer les traces et afficher la
+//! valeur exacte (1/10 s pour le chrono).
 //!
 //! Chronometre et minuteur utilisent le compteur depuis le demarrage : ils
 //! fonctionnent meme si l'heure n'est pas reglee, et continuent quand on
@@ -13,18 +16,23 @@
 
 use esp32_quick::FrameBuffer;
 use esp32_quick::clock::{self, uptime_ms};
+use esp32_quick::display::flap;
 use esp32_quick::input::{Input, Key};
 use heapless::String as HeapString;
 
 use super::app::{App, AppCommand};
 
-/// Taille des gros chiffres (police 10x20 agrandie : 60 x 120 px par caractere).
-const BIG_FACTOR: u32 = 6;
-const BIG_Y: i32 = 300;
+/// Centre vertical de la rangee de palettes.
+const FLAP_CENTER_Y: i32 = 230;
+/// Animation de bascule des palettes (une image intermediaire par changement,
+/// voir display::flap). A 1 Hz (chrono, minuteur) cela fait 2 rafraichissements
+/// partiels par seconde : ~0,92 s de travail avec le SPI a 10 MHz.
+const FLIP_ANIMATION: bool = true;
 
 /// Intervalle de mise a jour du chronometre en marche, en ms. En dessous de
 /// 1000, les dixiemes de seconde sont aussi affiches. Minimum realiste : ~500 ms
-/// (rafraichissement partiel constructeur : 0,42 s, + ~0,1 s d'envoi SPI a 4 MHz).
+/// (rafraichissement partiel constructeur : 0,42 s, + ~0,04 s d'envoi SPI a 10 MHz),
+/// et le double avec l'animation de bascule.
 const STOPWATCH_REFRESH_MS: u64 = 1000;
 
 /// Duree maximale du minuteur, en minutes.
@@ -103,13 +111,20 @@ impl Timer {
     }
 }
 
+/// Texte d'une rangee de palettes (au plus "100:00.0" ou "TERMINE").
+type FlapText = HeapString<16>;
+
 pub struct ClockApp {
     mode: Mode,
     stopwatch: Elapsed,
     timer: Timer,
-    /// Ce qui est actuellement affiche (voir `display_key`) : on ne redessine
-    /// que quand cette valeur change.
-    shown: (Mode, u64),
+    /// Texte actuellement affiche en palettes : on ne redessine que quand le
+    /// texte a afficher change.
+    shown: FlapText,
+    /// Texte affiche avant `shown`, pour l'image a mi-bascule.
+    previous: FlapText,
+    /// Vrai si l'image affichee est l'image a mi-bascule (l'image finale suit).
+    flipping: bool,
 }
 
 impl ClockApp {
@@ -122,24 +137,99 @@ impl ClockApp {
                 elapsed: Elapsed::default(),
                 finished: false,
             },
-            shown: (Mode::Clock, u64::MAX),
+            shown: FlapText::new(),
+            previous: FlapText::new(),
+            flipping: false,
         }
     }
 
-    /// Valeur qui change exactement quand l'ecran doit etre redessine.
-    fn display_key(&self, now: u64) -> (Mode, u64) {
-        let value = match self.mode {
-            // Minute courante (u64::MAX - 1 si l'heure n'est pas reglee).
-            Mode::Clock => clock::now().map_or(u64::MAX - 1, |dt| dt.to_secs() / 60),
-            Mode::Stopwatch if self.stopwatch.running() => self.stopwatch.get(now) / STOPWATCH_REFRESH_MS,
-            Mode::Stopwatch => self.stopwatch.get(now),
-            Mode::Timer if self.timer.finished => u64::MAX - 2,
-            Mode::Timer => {
-                let remaining = self.timer.remaining(now);
-                if self.timer.elapsed.running() { remaining.div_ceil(1000) } else { remaining }
+    /// Texte a afficher en palettes, maintenant.
+    fn flap_text(&self, now: u64) -> FlapText {
+        let mut text = FlapText::new();
+        match self.mode {
+            Mode::Clock => match clock::now() {
+                Some(dt) => {
+                    let _ = core::fmt::write(&mut text, format_args!("{:02}:{:02}", dt.hour, dt.minute));
+                }
+                None => {
+                    let _ = text.push_str("--:--");
+                }
+            },
+            Mode::Stopwatch => {
+                let elapsed = self.stopwatch.get(now);
+                text = format_min_sec(elapsed);
+                // Dixiemes : a l'arret (valeur exacte), ou en marche si la
+                // frequence de mise a jour le permet.
+                if !self.stopwatch.running() || STOPWATCH_REFRESH_MS < 1000 {
+                    let tenths = if self.stopwatch.running() {
+                        elapsed / STOPWATCH_REFRESH_MS * STOPWATCH_REFRESH_MS % 1000 / 100
+                    } else {
+                        elapsed % 1000 / 100
+                    };
+                    let _ = core::fmt::write(&mut text, format_args!(".{}", tenths));
+                } else {
+                    // En marche a 1 Hz : secondes entieres.
+                    text = format_min_sec(elapsed / 1000 * 1000);
+                }
             }
-        };
-        (self.mode, value)
+            Mode::Timer => {
+                if self.timer.finished {
+                    let _ = text.push_str("TERMINE");
+                } else if self.timer.duration_ms == 0 {
+                    let _ = text.push_str("--:--");
+                } else {
+                    // Arrondi a la seconde superieure : 4:59.2 restant s'affiche 05:00.
+                    text = format_min_sec(self.timer.remaining(now).div_ceil(1000) * 1000);
+                }
+            }
+        }
+        text
+    }
+
+    /// Ligne d'etat sous les palettes.
+    fn status_line(&self, canvas: &mut FrameBuffer) {
+        match self.mode {
+            Mode::Clock => match clock::now() {
+                Some(dt) => {
+                    let mut date = HeapString::<64>::new();
+                    let _ = core::fmt::write(
+                        &mut date,
+                        format_args!(
+                            "{} {} {} {} - semaine {}",
+                            dt.weekday_name(),
+                            dt.day,
+                            dt.month_name(),
+                            dt.year,
+                            dt.iso_week()
+                        ),
+                    );
+                    canvas.text_centered(date.as_str(), 380);
+                }
+                None => canvas.text_centered("Heure non reglee : TIME AAAA-MM-JJ HH:MM", 380),
+            },
+            Mode::Stopwatch => canvas.text_centered(
+                if self.stopwatch.running() {
+                    "En marche - STOP pour pause"
+                } else if self.stopwatch.accumulated_ms == 0 {
+                    "START pour demarrer"
+                } else {
+                    "En pause - START / RESET"
+                },
+                380,
+            ),
+            Mode::Timer => canvas.text_centered(
+                if self.timer.finished {
+                    "RESET pour effacer, MIN <n> pour relancer"
+                } else if self.timer.duration_ms == 0 {
+                    "MIN <n> pour lancer un minuteur de n minutes"
+                } else if self.timer.elapsed.running() {
+                    "En marche - STOP pour pause"
+                } else {
+                    "En pause - START / RESET"
+                },
+                380,
+            ),
+        }
     }
 
     fn handle_text(&mut self, text: &str, now: u64) -> AppCommand {
@@ -257,70 +347,17 @@ impl App for ClockApp {
     }
 
     fn render(&self, canvas: &mut FrameBuffer) {
-        let now = uptime_ms();
         self.render_tabs(canvas);
 
-        match self.mode {
-            Mode::Clock => match clock::now() {
-                Some(dt) => {
-                    let mut time = HeapString::<8>::new();
-                    let _ = core::fmt::write(&mut time, format_args!("{:02}:{:02}", dt.hour, dt.minute));
-                    canvas.text_big_centered(time.as_str(), BIG_Y, BIG_FACTOR);
-
-                    let mut date = HeapString::<64>::new();
-                    let _ = core::fmt::write(
-                        &mut date,
-                        format_args!(
-                            "{} {} {} {} - semaine {}",
-                            dt.weekday_name(),
-                            dt.day,
-                            dt.month_name(),
-                            dt.year,
-                            dt.iso_week()
-                        ),
-                    );
-                    canvas.text_centered(date.as_str(), 380);
-                }
-                None => {
-                    canvas.text_big_centered("--:--", BIG_Y, BIG_FACTOR);
-                    canvas.text_centered("Heure non reglee : TIME AAAA-MM-JJ HH:MM", 380);
-                }
-            },
-            Mode::Stopwatch => {
-                let elapsed = self.stopwatch.get(now);
-                let mut text = format_min_sec(elapsed);
-                let status = if self.stopwatch.running() {
-                    if STOPWATCH_REFRESH_MS < 1000 {
-                        let _ = core::fmt::write(&mut text, format_args!(".{}", elapsed % 1000 / 100));
-                    }
-                    "En marche - STOP pour pause"
-                } else {
-                    // A l'arret : valeur exacte, au dixieme de seconde.
-                    let _ = core::fmt::write(&mut text, format_args!(".{}", elapsed % 1000 / 100));
-                    if elapsed == 0 { "START pour demarrer" } else { "En pause - START / RESET" }
-                };
-                canvas.text_big_centered(text.as_str(), BIG_Y, BIG_FACTOR);
-                canvas.text_centered(status, 380);
-            }
-            Mode::Timer => {
-                if self.timer.finished {
-                    canvas.text_big_centered("Termine", BIG_Y, BIG_FACTOR);
-                    canvas.text_centered("RESET pour effacer, MIN <n> pour relancer", 380);
-                } else if self.timer.duration_ms == 0 {
-                    canvas.text_big_centered("--:--", BIG_Y, BIG_FACTOR);
-                    canvas.text_centered("MIN <n> pour lancer un minuteur de n minutes", 380);
-                } else {
-                    // Arrondi a la seconde superieure : 4:59.2 restant s'affiche 05:00.
-                    let remaining = self.timer.remaining(now).div_ceil(1000) * 1000;
-                    canvas.text_big_centered(format_min_sec(remaining).as_str(), BIG_Y, BIG_FACTOR);
-                    canvas.text_centered(
-                        if self.timer.elapsed.running() { "En marche - STOP pour pause" } else { "En pause - START / RESET" },
-                        380,
-                    );
-                }
-            }
+        let previous = if self.flipping { Some(self.previous.as_str()) } else { None };
+        if self.shown.is_empty() {
+            // Pas encore de tick depuis le demarrage : texte calcule a la volee.
+            flap::draw_row(canvas, self.flap_text(uptime_ms()).as_str(), None, FLAP_CENTER_Y);
+        } else {
+            flap::draw_row(canvas, self.shown.as_str(), previous, FLAP_CENTER_Y);
         }
 
+        self.status_line(canvas);
         canvas.text_centered("LEFT/RIGHT : mode | HELP : commandes | BACK : menu", 465);
     }
 
@@ -339,9 +376,10 @@ impl App for ClockApp {
             Input::Key(_) => AppCommand::Stay,
             Input::Text(text) => self.handle_text(text.trim(), now),
         };
-        // L'ecran va etre redessine : memorise ce qu'il affichera, pour que le
-        // prochain tick ne le redessine pas une seconde fois.
-        self.shown = self.display_key(now);
+        // L'ecran va etre redessine directement (sans animation) : memorise ce
+        // qu'il affichera, pour que le prochain tick ne le redessine pas.
+        self.shown = self.flap_text(now);
+        self.flipping = false;
         command
     }
 
@@ -357,23 +395,34 @@ impl App for ClockApp {
             esp_println::println!("*** Minuteur termine ! ***");
         }
 
-        let key = self.display_key(now);
-        if key == self.shown {
-            return AppCommand::Stay;
-        }
-        self.shown = key;
-
         let live = match self.mode {
             Mode::Stopwatch => self.stopwatch.running(),
             Mode::Timer => self.timer.elapsed.running(),
-            Mode::Clock => false,
+            Mode::Clock => true,
         };
-        if live {
+        let command = if just_finished && self.mode == Mode::Timer {
+            AppCommand::FullRedraw // "TERMINE" bien net
+        } else if live {
             AppCommand::LiveRedraw
-        } else if just_finished && self.mode == Mode::Timer {
-            AppCommand::FullRedraw // "Termine" bien net
         } else {
             AppCommand::Redraw
+        };
+
+        // Image a mi-bascule affichee au tick precedent : afficher l'image finale.
+        if self.flipping {
+            self.flipping = false;
+            return command;
         }
+
+        let text = self.flap_text(now);
+        if text == self.shown {
+            return AppCommand::Stay;
+        }
+        self.previous = core::mem::replace(&mut self.shown, text);
+        // Pas d'animation si la disposition change (ex. "00:03" -> "TERMINE").
+        self.flipping = FLIP_ANIMATION
+            && !just_finished
+            && self.previous.chars().count() == self.shown.chars().count();
+        command
     }
 }

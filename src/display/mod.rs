@@ -2,6 +2,7 @@
 //! qui regroupe l'ecran et son tampon d'image.
 
 pub mod canvas;
+pub mod flap;
 pub mod epd;
 
 pub use canvas::{CHAR_WIDTH, FrameBuffer, Scaled, clear_full_buffer};

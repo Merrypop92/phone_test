@@ -15,7 +15,7 @@ pub const PX_HEIGHT: u32 = 480;
 pub const BUF_SIZE: usize = (PX_WIDTH as usize * PX_HEIGHT as usize) / 8;
 
 /// Durees constructeur (GDEQ0426T82) : complet 3,5 s, rapide 1,5 s, partiel 0,42 s.
-/// S'y ajoute l'envoi de l'image en SPI (48 000 octets, ~0,1 s a 4 MHz).
+/// S'y ajoute l'envoi de l'image en SPI (48 000 octets, ~0,04 s a 10 MHz).
 
 /// Nombre de rafraichissements partiels avant un rafraichissement complet force.
 /// Le partiel laisse des traces (ghosting) qui s'accumulent ; un complet les efface.
