@@ -2,15 +2,13 @@
 //! une plaquette noire aux coins arrondis, caractere en blanc, coupee en deux
 //! par la fente horizontale, avec les encoches des charnieres sur les cotes.
 //!
-//! Animation de bascule : `draw_row(.., Some(ancien_texte), ..)` dessine l'etat
-//! intermediaire des palettes qui changent, comme la derniere palette qui tombe
-//! sur un vrai panneau : demi-palette du haut = nouveau caractere, demi-palette
-//! du bas = caractere qui le precede dans l'ordre des palettes (le 4 pour un 5,
-//! le 9 pour un 0), et non l'ancien caractere affiche : si l'affichage a saute
-//! une valeur (3 -> 5), l'image reste celle d'un vrai panneau (haut 5 / bas 4).
-//! On affiche cette image, puis l'etat final.
+//! Les moitiés haute et basse sont deux choses distinctes : `draw_row` recoit
+//! le texte affiche par les demi-palettes du haut et celui des demi-palettes du
+//! bas. Pour animer une bascule, l'appelant change d'abord le texte du haut
+//! (image 1 : seuls les hauts bougent), puis aligne le bas sur le haut (image 2 :
+//! seuls les bas bougent).
 //!
-//! Police : FONT_10X20 agrandie x6 (dans sa case de 10x20, un chiffre occupe
+//! Police : FONT_10X20 agrandie x7 (dans sa case de 10x20, un chiffre occupe
 //! les colonnes 1 a 8 et les lignes 3 a 15 : centre en (4.5, 9)).
 
 use embedded_graphics::draw_target::DrawTargetExt;
@@ -52,36 +50,27 @@ pub fn row_width(text: &str) -> i32 {
     text.chars().map(|c| char_width(c) as i32).sum::<i32>() + GAP * (count - 1).max(0)
 }
 
-/// Dessine `text` en palettes, centre horizontalement, les plaquettes centrees
-/// verticalement sur `center_y`. Si `previous` est fourni (et de meme longueur),
-/// les caracteres qui changent sont dessines a mi-bascule.
-pub fn draw_row(canvas: &mut FrameBuffer, text: &str, previous: Option<&str>, center_y: i32) {
-    let previous = previous.filter(|old| old.chars().count() == text.chars().count());
+/// Dessine une rangee de palettes, centree horizontalement, les plaquettes
+/// centrees verticalement sur `center_y` : demi-palettes du haut = `top_text`,
+/// demi-palettes du bas = `bottom_text`. Si les deux textes n'ont pas la meme
+/// longueur (disposition differente), `top_text` est utilise pour les deux.
+pub fn draw_row(canvas: &mut FrameBuffer, top_text: &str, bottom_text: &str, center_y: i32) {
+    let same_layout = top_text.chars().count() == bottom_text.chars().count();
     let top = center_y - TILE_HEIGHT as i32 / 2;
-    let mut x = (canvas.width as i32 - row_width(text)) / 2;
+    let mut x = (canvas.width as i32 - row_width(top_text)) / 2;
 
-    for (index, new) in text.chars().enumerate() {
-        let old = previous.and_then(|old| old.chars().nth(index)).unwrap_or(new);
-        let bottom = if old == new { new } else { flap_predecessor(new, old) };
-        if is_separator(new) {
-            draw_separator(canvas, x, top, new);
+    for (index, top_char) in top_text.chars().enumerate() {
+        let bottom_char = if same_layout {
+            bottom_text.chars().nth(index).unwrap_or(top_char)
         } else {
-            draw_tile(canvas, x, top, new, bottom);
+            top_char
+        };
+        if is_separator(top_char) {
+            draw_separator(canvas, x, top, top_char);
+        } else {
+            draw_tile(canvas, x, top, top_char, bottom_char);
         }
-        x += char_width(new) as i32 + GAP;
-    }
-}
-
-/// Palette qui precede `new` sur son tambour (`old` = caractere affiche avant).
-/// - 1 a 9 : le chiffre juste avant (meme si l'affichage a saute une valeur) ;
-/// - 0 : le tambour vient de faire un tour, et sa derniere valeur depend de la
-///   position (9 pour des unites, 5 pour des dizaines de secondes, 2 pour des
-///   dizaines d'heures) : c'est l'ancien chiffre affiche ;
-/// - autres caracteres : l'ancien caractere.
-fn flap_predecessor(new: char, old: char) -> char {
-    match new {
-        '1'..='9' => char::from_u32(new as u32 - 1).unwrap_or(old),
-        _ => old,
+        x += char_width(top_char) as i32 + GAP;
     }
 }
 

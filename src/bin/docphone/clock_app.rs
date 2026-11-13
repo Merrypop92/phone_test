@@ -1,9 +1,10 @@
 //! App Horloge : heure, chronometre et minuteur, affiches facon panneau de gare
 //! a palettes (voir esp32_quick::display::flap).
 //!
-//! L'app memorise le texte affiche en palettes (`shown`, ex. "16:47"). Quand il
-//! change, elle affiche d'abord l'image a mi-bascule (haut = nouveau chiffre,
-//! bas = chiffre precedent), puis l'image finale au tick suivant.
+//! Les demi-palettes du haut et du bas ont chacune leur etat (`top` et
+//! `bottom`, ex. "16:47"). Quand la valeur change, seuls les hauts prennent la
+//! nouvelle valeur (image 1), puis au tick suivant les bas rattrapent les hauts
+//! (image 2) : le haut bascule d'abord, le bas ensuite.
 //! Mises a jour en mode "live" (`LiveRedraw`) :
 //! - Horloge : chaque minute ;
 //! - Chronometre et minuteur en marche : chaque seconde.
@@ -25,14 +26,15 @@ use super::app::{App, AppCommand};
 /// Centre vertical de la rangee de palettes.
 const FLAP_CENTER_Y: i32 = 230;
 /// Animation de bascule des palettes (une image intermediaire par changement,
-/// voir display::flap). A 1 Hz (chrono, minuteur) cela fait 2 rafraichissements
-/// partiels par seconde : ~0,92 s de travail avec le SPI a 10 MHz.
+/// voir display::flap) : 2 rafraichissements partiels par changement (~0,92 s
+/// avec le SPI a 10 MHz). Pour le chrono et le minuteur, qui changent chaque
+/// seconde, seules les secondes paires sont animees ; les impaires s'affichent
+/// directement (1 rafraichissement) : ~1,4 s de travail toutes les 2 s.
 const FLIP_ANIMATION: bool = true;
 
-/// Intervalle de mise a jour du chronometre en marche, en ms. En dessous de
-/// 1000, les dixiemes de seconde sont aussi affiches. Minimum realiste : ~500 ms
-/// (rafraichissement partiel constructeur : 0,42 s, + ~0,04 s d'envoi SPI a 10 MHz),
-/// et le double avec l'animation de bascule.
+/// Pas d'affichage du chronometre et du minuteur en marche, en ms (1000 = chaque
+/// seconde ; 2000 = une seconde sur deux). En dessous de 1000, les dixiemes de
+/// seconde sont aussi affiches.
 const STOPWATCH_REFRESH_MS: u64 = 1000;
 
 /// Duree maximale du minuteur, en minutes.
@@ -118,13 +120,11 @@ pub struct ClockApp {
     mode: Mode,
     stopwatch: Elapsed,
     timer: Timer,
-    /// Texte actuellement affiche en palettes : on ne redessine que quand le
-    /// texte a afficher change.
-    shown: FlapText,
-    /// Texte affiche avant `shown`, pour l'image a mi-bascule.
-    previous: FlapText,
-    /// Vrai si l'image affichee est l'image a mi-bascule (l'image finale suit).
-    flipping: bool,
+    /// Texte affiche par les demi-palettes du haut.
+    top: FlapText,
+    /// Texte affiche par les demi-palettes du bas. Different de `top` seulement
+    /// pendant une bascule (entre l'image 1 et l'image 2).
+    bottom: FlapText,
 }
 
 impl ClockApp {
@@ -137,9 +137,8 @@ impl ClockApp {
                 elapsed: Elapsed::default(),
                 finished: false,
             },
-            shown: FlapText::new(),
-            previous: FlapText::new(),
-            flipping: false,
+            top: FlapText::new(),
+            bottom: FlapText::new(),
         }
     }
 
@@ -168,8 +167,8 @@ impl ClockApp {
                     };
                     let _ = core::fmt::write(&mut text, format_args!(".{}", tenths));
                 } else {
-                    // En marche a 1 Hz : secondes entieres.
-                    text = format_min_sec(elapsed / 1000 * 1000);
+                    // En marche : arrondi au pas inferieur (une seconde sur deux).
+                    text = format_min_sec(elapsed / STOPWATCH_REFRESH_MS * STOPWATCH_REFRESH_MS);
                 }
             }
             Mode::Timer => {
@@ -178,8 +177,14 @@ impl ClockApp {
                 } else if self.timer.duration_ms == 0 {
                     let _ = text.push_str("--:--");
                 } else {
-                    // Arrondi a la seconde superieure : 4:59.2 restant s'affiche 05:00.
-                    text = format_min_sec(self.timer.remaining(now).div_ceil(1000) * 1000);
+                    // Arrondi au pas superieur : 4:59.2 restant s'affiche 05:00 ; avec
+                    // un pas de 2 s, le compte a rebours affiche une seconde sur deux.
+                    let remaining = self.timer.remaining(now);
+                    text = if self.timer.elapsed.running() {
+                        format_min_sec(remaining.div_ceil(STOPWATCH_REFRESH_MS) * STOPWATCH_REFRESH_MS)
+                    } else {
+                        format_min_sec(remaining.div_ceil(1000) * 1000)
+                    };
                 }
             }
         }
@@ -317,6 +322,14 @@ impl ClockApp {
     }
 }
 
+/// Vrai si le dernier caractere est un chiffre pair ("00:04" -> vrai).
+fn ends_with_even_digit(text: &str) -> bool {
+    text.chars()
+        .last()
+        .and_then(|c| c.to_digit(10))
+        .is_some_and(|digit| digit % 2 == 0)
+}
+
 /// "MM:SS" (minutes non bornees : "125:07").
 fn format_min_sec(ms: u64) -> HeapString<16> {
     let secs = ms / 1000;
@@ -349,12 +362,12 @@ impl App for ClockApp {
     fn render(&self, canvas: &mut FrameBuffer) {
         self.render_tabs(canvas);
 
-        let previous = if self.flipping { Some(self.previous.as_str()) } else { None };
-        if self.shown.is_empty() {
+        if self.top.is_empty() {
             // Pas encore de tick depuis le demarrage : texte calcule a la volee.
-            flap::draw_row(canvas, self.flap_text(uptime_ms()).as_str(), None, FLAP_CENTER_Y);
+            let text = self.flap_text(uptime_ms());
+            flap::draw_row(canvas, text.as_str(), text.as_str(), FLAP_CENTER_Y);
         } else {
-            flap::draw_row(canvas, self.shown.as_str(), previous, FLAP_CENTER_Y);
+            flap::draw_row(canvas, self.top.as_str(), self.bottom.as_str(), FLAP_CENTER_Y);
         }
 
         self.status_line(canvas);
@@ -378,8 +391,8 @@ impl App for ClockApp {
         };
         // L'ecran va etre redessine directement (sans animation) : memorise ce
         // qu'il affichera, pour que le prochain tick ne le redessine pas.
-        self.shown = self.flap_text(now);
-        self.flipping = false;
+        self.top = self.flap_text(now);
+        self.bottom = self.top.clone();
         command
     }
 
@@ -408,21 +421,30 @@ impl App for ClockApp {
             AppCommand::Redraw
         };
 
-        // Image a mi-bascule affichee au tick precedent : afficher l'image finale.
-        if self.flipping {
-            self.flipping = false;
+        // Image 2 : les hauts ont bascule au tick precedent, les bas les rejoignent.
+        if self.bottom != self.top {
+            self.bottom = self.top.clone();
             return command;
         }
 
         let text = self.flap_text(now);
-        if text == self.shown {
+        if text == self.top {
             return AppCommand::Stay;
         }
-        self.previous = core::mem::replace(&mut self.shown, text);
-        // Pas d'animation si la disposition change (ex. "00:03" -> "TERMINE").
-        self.flipping = FLIP_ANIMATION
+
+        // Pas d'animation si la disposition change (ex. "00:02" -> "TERMINE").
+        // Chrono et minuteur : animation seulement pour les secondes paires.
+        let animate = FLIP_ANIMATION
             && !just_finished
-            && self.previous.chars().count() == self.shown.chars().count();
+            && text.chars().count() == self.bottom.chars().count()
+            && (self.mode == Mode::Clock || ends_with_even_digit(&text));
+        if animate {
+            // Image 1 : seuls les hauts prennent la nouvelle valeur.
+            self.top = text;
+        } else {
+            self.top = text.clone();
+            self.bottom = text;
+        }
         command
     }
 }
