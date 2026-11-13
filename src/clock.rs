@@ -23,6 +23,9 @@ pub const MIN_YEAR: u16 = 2000;
 pub const MAX_YEAR: u16 = 2099;
 
 pub const WEEKDAY_NAMES: [&str; 7] = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
+/// Abreviations de 3 lettres (affichage en palettes).
+pub const WEEKDAY_SHORT: [&str; 7] = ["LUN", "MAR", "MER", "JEU", "VEN", "SAM", "DIM"];
+pub const MONTH_SHORT: [&str; 12] = ["JAN", "FEV", "MAR", "AVR", "MAI", "JUN", "JUL", "AOU", "SEP", "OCT", "NOV", "DEC"];
 pub const MONTH_NAMES: [&str; 12] = [
     "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin",
     "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre",
@@ -147,6 +150,16 @@ impl DateTime {
 
     pub fn month_name(&self) -> &'static str {
         MONTH_NAMES[self.month as usize - 1]
+    }
+
+    /// Jour de la semaine en 3 lettres ("JEU").
+    pub fn weekday_short(&self) -> &'static str {
+        WEEKDAY_SHORT[self.weekday() as usize]
+    }
+
+    /// Mois en 3 lettres ("NOV").
+    pub fn month_short(&self) -> &'static str {
+        MONTH_SHORT[self.month as usize - 1]
     }
 
     /// Numero de semaine ISO 8601 (la semaine 1 contient le premier jeudi de l'annee).

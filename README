@@ -18,6 +18,10 @@ Programmes de test du materiel (dossier examples/) :
     cargo run --example epaper_demo      # modes de rafraichissement e-paper
     cargo run --example epd_window_test  # adressage d'une fenetre en rafraichissement partiel
     cargo run --example flap_band_test   # palettes : envoi par bande / plein ecran
+    cargo run --example scoreboard_chrono # chrono facon tableau de score (cartes accrochees en haut)
+    cargo run --example top_half_chrono  # chrono : seulement le dessin du haut des chiffres
+    cargo run --example split_chrono     # chrono : le haut puis le bas, avec mesure des temps reels
+    cargo run --example adaptive_chrono  # chrono : transition seulement si le temps le permet
     cargo run --example keypad_test      # matrice de boutons TCA8418
     cargo run --example i2c_scan         # diagnostic du bus I2C / soudure du TCA8418
     cargo run --example lte_charge_test  # PWRKEY du module LTE + detection de charge (ADC)

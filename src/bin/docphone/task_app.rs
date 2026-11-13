@@ -1,4 +1,5 @@
 use esp32_quick::FrameBuffer;
+use esp32_quick::display::flap::{self, SCREEN_MARGIN as MARGIN, SMALL};
 use esp32_quick::input::{Input, Key};
 use heapless::{String as HeapString, Vec as HeapVec};
 
@@ -54,6 +55,39 @@ impl TaskApp {
     }
 }
 
+/// Mise en page du tableau : 8 lignes de palettes (44 px) sous l'en-tete.
+const LIST_TOP: i32 = 80;
+const ROW_PITCH: i32 = 49;
+
+/// Ligne du tableau pour une tache : "1 [X] ! TITRE", titre coupe avec "..."
+/// s'il depasse `max_chars` caracteres au total.
+fn task_row(index: usize, task: &Task, max_chars: usize) -> HeapString<80> {
+    let mut row = HeapString::<80>::new();
+    let _ = core::fmt::write(
+        &mut row,
+        format_args!(
+            "{} [{}] {}",
+            index + 1,
+            if task.done { "X" } else { " " },
+            if task.urgent { "! " } else { "" }
+        ),
+    );
+    let room = max_chars.saturating_sub(row.chars().count());
+    let title_len = task.title.chars().count();
+    if title_len <= room {
+        let _ = row.push_str(task.title.as_str());
+    } else {
+        let mut cut = HeapString::<80>::new();
+        for c in task.title.chars().take(room.saturating_sub(3)) {
+            let _ = cut.push(c);
+        }
+        // Pas de palette vide avant "..." si la coupe tombe sur un espace.
+        let _ = row.push_str(cut.trim_end());
+        let _ = row.push_str("...");
+    }
+    row
+}
+
 /// Verifie qu'un titre n'est pas vide et tient dans MAX_TITLE_BYTES.
 fn parse_title(text: &str) -> Option<HeapString<MAX_TITLE_BYTES>> {
     let text = text.trim();
@@ -93,41 +127,34 @@ impl App for TaskApp {
         "ADD [!] <texte>, DONE <n>, CLEAR... Tape HELP pour toutes les commandes."
     }
 
+    /// Tableau des departs : titre et compteur en petites palettes, puis une
+    /// ligne par tache ("1 [X] ! TITRE"), titre coupe si trop long.
     fn render(&self, canvas: &mut FrameBuffer) {
         let done_count = self.done_count();
-        let mut header = HeapString::<48>::new();
+        let mut header = HeapString::<32>::new();
         let _ = core::fmt::write(
             &mut header,
             format_args!(
-                "Taches {}/{} - {} faite{} (RAM)",
+                "Taches {}/{} - {} faite{}",
                 self.tasks.len(),
                 MAX_TASKS,
                 done_count,
                 if done_count > 1 { "s" } else { "" }
             ),
         );
-        canvas.text(header.as_str(), 40, 70);
+        flap::draw_header(canvas, header.as_str(), None);
 
         if self.tasks.is_empty() {
-            canvas.text("Aucune tache. ADD <texte> pour commencer.", 40, 140);
+            flap::draw_text(canvas, &SMALL, "Aucune tache", MARGIN, LIST_TOP);
+            canvas.text("ADD <texte> pour ajouter une tache, HELP pour l'aide.", MARGIN, LIST_TOP + 90);
+            return;
         }
 
+        let max_chars = SMALL.max_chars(canvas.width as i32 - 2 * MARGIN);
         for (index, task) in self.tasks.iter().enumerate() {
-            let mut label = HeapString::<64>::new();
-            let _ = core::fmt::write(
-                &mut label,
-                format_args!(
-                    "{}. [{}] {}{}",
-                    index + 1,
-                    if task.done { "x" } else { " " },
-                    if task.urgent { "! " } else { "" },
-                    task.title.as_str()
-                ),
-            );
-            canvas.text(label.as_str(), 40, 140 + index as i32 * 40);
+            let row = task_row(index, task, max_chars);
+            flap::draw_text(canvas, &SMALL, row.as_str(), MARGIN, LIST_TOP + index as i32 * ROW_PITCH);
         }
-
-        canvas.text("ADD [!] | DONE/UNDO | URGENT | CLEAR | HELP", 40, 465);
     }
 
     fn handle_input(&mut self, input: Input) -> AppCommand {

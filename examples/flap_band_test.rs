@@ -97,7 +97,7 @@ fn render(buf: &mut [u8], title: &str, top: &str, bottom: &str) {
     clear_full_buffer(buf);
     let mut canvas = FrameBuffer { buf, width: PX_WIDTH, height: PX_HEIGHT };
     canvas.text_centered(title, 40);
-    flap::draw_row(&mut canvas, top, bottom, FLAP_CENTER_Y);
+    flap::draw_row_halves(&mut canvas, top, bottom, FLAP_CENTER_Y);
 }
 
 /// Envoie l'image en rafraichissement partiel, selon la methode.

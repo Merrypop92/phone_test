@@ -1,12 +1,31 @@
 use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::*;
-use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
+use embedded_graphics::primitives::{PrimitiveStyle, Triangle};
 use esp32_quick::FrameBuffer;
 use esp32_quick::clock;
+use esp32_quick::display::flap::{self, SMALL};
 use esp32_quick::input::{Input, Key};
 use heapless::String as HeapString;
 
 use super::app::AppCommand;
+
+/// Mise en page du tableau des departs.
+const ARROW_LEFT: i32 = 30;
+const LIST_TOP: i32 = 120;
+const LIST_LEFT: i32 = 80;
+/// Ecart vertical entre deux lignes (plaquettes de 44 px) : 5 apps visibles.
+const ROW_PITCH: i32 = 64;
+
+/// Fleche noire pointant vers la droite, pointe a (x + 30, center_y).
+fn draw_arrow(canvas: &mut FrameBuffer, x: i32, center_y: i32) {
+    let _ = Triangle::new(
+        Point::new(x, center_y - 16),
+        Point::new(x, center_y + 16),
+        Point::new(x + 30, center_y),
+    )
+    .into_styled(PrimitiveStyle::with_fill(BinaryColor::On))
+    .draw(canvas);
+}
 
 /// Menu principal. La liste des apps vient du launcher (registre de main.rs) :
 /// le menu ne garde que la position de la selection.
@@ -34,39 +53,43 @@ impl MenuApp {
         AppCommand::Redraw
     }
 
+    /// Tableau des departs : "DOCPHONE" et la date en petites palettes en
+    /// haut, puis un nom d'app par ligne, la ligne selectionnee marquee par une
+    /// fleche noire.
     pub fn render<'n>(&self, canvas: &mut FrameBuffer, names: impl Iterator<Item = &'n str>) {
-        canvas.text("DocPhone", 40, 80);
-
-        // Date et heure en haut a droite, ou une invite si l'heure n'est pas reglee.
-        let mut header = HeapString::<48>::new();
+        // Date et heure a droite ("12 NOV 16:47"), ou "HEURE ?". Pas de jour de
+        // la semaine : avec, l'en-tete se colle a "DOCPHONE" (il reste dans
+        // l'Horloge).
+        let mut header = HeapString::<24>::new();
         match clock::now() {
             Some(now) => {
                 let _ = core::fmt::write(
                     &mut header,
                     format_args!(
-                        "{} {} {} {:02}:{:02}",
-                        now.weekday_name(),
+                        "{:02} {} {:02}:{:02}",
                         now.day,
-                        now.month_name(),
+                        now.month_short(),
                         now.hour,
                         now.minute
                     ),
                 );
             }
             None => {
-                let _ = header.push_str("Heure ? TIME AAAA-MM-JJ HH:MM");
+                let _ = header.push_str("HEURE ?");
             }
         }
-        canvas.text_right(header.as_str(), 40, 80);
+        flap::draw_header(canvas, "DocPhone", Some(header.as_str()));
 
-        for (index, label) in names.enumerate() {
-            let y = 170 + index as i32 * 70;
+        for (index, name) in names.enumerate() {
+            let top = LIST_TOP + index as i32 * ROW_PITCH;
             if index == self.selected {
-                let _ = Rectangle::new(Point::new(32, y - 34), Size::new(360, 48))
-                    .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 2))
-                    .draw(canvas);
+                draw_arrow(canvas, ARROW_LEFT, top + SMALL.tile_height as i32 / 2);
             }
-            canvas.text(label, 50, y);
+            flap::draw_text(canvas, &SMALL, name, LIST_LEFT, top);
+        }
+
+        if clock::now().is_none() {
+            canvas.text_centered("Regler l'heure : TIME AAAA-MM-JJ HH:MM", 455);
         }
     }
 
