@@ -510,6 +510,13 @@ impl core::fmt::Display for DateLabel<'_> {
 
 /// Texte UCS2 (UTF-16 en hexadecimal, ex. "00480069" = "Hi") affiche en
 /// clair. Si le texte n'est pas de l'hexadecimal UCS2, il est affiche tel quel.
+///
+/// PARTICULARITE DU A7682E : pour un SMS recu dans l'alphabet GSM 7 bits (le
+/// cas de la plupart des SMS sans emoji), le module ne convertit pas en vrai
+/// UCS2 mais recopie les codes GSM bruts : "é" arrive en 0005 au lieu de
+/// 00E9 (constate : "r0005server" pour "réserver"). Si toutes les valeurs sont
+/// < 0x80, le texte est donc decode avec la table GSM 03.38 ; sinon c'est un
+/// vrai SMS UCS2 (emojis, caracteres hors alphabet GSM), decode en UTF-16.
 struct Decoded<'a> {
     hex: &'a str,
     /// Nombre maximal de caracteres affiches (`None` = tout).
@@ -528,6 +535,15 @@ impl<'a> Decoded<'a> {
     fn is_ucs2(&self) -> bool {
         !self.hex.is_empty() && self.hex.len() % 4 == 0 && self.hex.bytes().all(|b| b.is_ascii_hexdigit())
     }
+
+    /// Valeurs 16 bits du texte hexadecimal.
+    fn units(&self) -> impl Iterator<Item = u16> + '_ {
+        self.hex
+            .as_bytes()
+            .chunks(4)
+            .filter_map(|chunk| core::str::from_utf8(chunk).ok())
+            .filter_map(|digits| u16::from_str_radix(digits, 16).ok())
+    }
 }
 
 impl core::fmt::Display for Decoded<'_> {
@@ -536,24 +552,74 @@ impl core::fmt::Display for Decoded<'_> {
         if !self.is_ucs2() {
             return f.write_str(self.hex);
         }
-        let units = self
-            .hex
-            .as_bytes()
-            .chunks(4)
-            .filter_map(|chunk| core::str::from_utf8(chunk).ok())
-            .filter_map(|digits| u16::from_str_radix(digits, 16).ok());
         let limit = self.limit.unwrap_or(usize::MAX);
-        for (count, decoded) in char::decode_utf16(units).enumerate() {
-            if count >= limit {
-                return f.write_str("...");
+        let mut count = 0;
+        let mut put = |f: &mut core::fmt::Formatter<'_>, c: char| -> core::fmt::Result {
+            if count == limit {
+                f.write_str("...")?;
             }
-            match decoded.unwrap_or(char::REPLACEMENT_CHARACTER) {
+            count += 1;
+            if count > limit {
+                return Ok(());
+            }
+            match c {
                 // Apercu sur une ligne : retours a la ligne remplaces.
-                '\n' | '\r' if self.limit.is_some() => f.write_char(' ')?,
-                c => f.write_char(c)?,
+                '\n' | '\r' if self.limit.is_some() => f.write_char(' '),
+                c => f.write_char(c),
+            }
+        };
+
+        if self.units().all(|unit| unit < 0x80) {
+            // Codes GSM bruts (cf. commentaire de la structure).
+            let mut escape = false;
+            for unit in self.units() {
+                let code = unit as u8;
+                if escape {
+                    escape = false;
+                    put(f, gsm_extension(code))?;
+                } else if code == 0x1B {
+                    escape = true;
+                } else {
+                    put(f, GSM_BASIC[code as usize])?;
+                }
+            }
+        } else {
+            for decoded in char::decode_utf16(self.units()) {
+                put(f, decoded.unwrap_or(char::REPLACEMENT_CHARACTER))?;
             }
         }
         Ok(())
+    }
+}
+
+/// Alphabet GSM 03.38 (table de base) : code GSM 0x00..0x7F -> caractere.
+/// 0x1B (echappement vers la table etendue) est traite a part.
+#[rustfmt::skip]
+const GSM_BASIC: [char; 128] = [
+    '@', '£', '$', '¥', 'è', 'é', 'ù', 'ì', 'ò', 'Ç', '\n', 'Ø', 'ø', '\r', 'Å', 'å',
+    'Δ', '_', 'Φ', 'Γ', 'Λ', 'Ω', 'Π', 'Ψ', 'Σ', 'Θ', 'Ξ', ' ', 'Æ', 'æ', 'ß', 'É',
+    ' ', '!', '"', '#', '¤', '%', '&', '\'', '(', ')', '*', '+', ',', '-', '.', '/',
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', ':', ';', '<', '=', '>', '?',
+    '¡', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O',
+    'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'Ä', 'Ö', 'Ñ', 'Ü', '§',
+    '¿', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',
+    'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'ä', 'ö', 'ñ', 'ü', 'à',
+];
+
+/// Table etendue GSM 03.38 : caractere apres l'echappement 0x1B.
+fn gsm_extension(code: u8) -> char {
+    match code {
+        0x0A => '\n', // saut de page
+        0x14 => '^',
+        0x28 => '{',
+        0x29 => '}',
+        0x2F => '\\',
+        0x3C => '[',
+        0x3D => '~',
+        0x3E => ']',
+        0x40 => '|',
+        0x65 => '€',
+        _ => '?',
     }
 }
 
