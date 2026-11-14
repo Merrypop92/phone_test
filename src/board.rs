@@ -24,7 +24,7 @@ use esp_hal::analog::adc::{Adc, AdcConfig, AdcPin, Attenuation};
 use esp_hal::gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull};
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::peripherals::{
-    ADC1, GPIO1, GPIO2, GPIO3, GPIO5, GPIO12, GPIO13, GPIO14, GPIO18, GPIO21, GPIO22, GPIO23, GPIO25,
+    ADC1, GPIO1, GPIO2, GPIO3, GPIO5, GPIO12, GPIO13, GPIO14, GPIO15, GPIO18, GPIO21, GPIO22, GPIO23, GPIO25,
     GPIO26, GPIO27, GPIO32, GPIO39, I2C0, SPI2, TIMG0, UART0, UART1,
 };
 use esp_hal::spi::Mode;
@@ -211,8 +211,31 @@ pub fn blink(led: &mut Output<'_>, count: u32, ms: u32) {
 }
 
 // ---------------------------------------------------------------------------
+// Bouton home : HOME1 (TS-1157) entre SW_HOME=GPIO15 et la masse, SANS
+// pull-up externe sur le PCB : pull-up interne de l'ESP32. Niveau bas = appuye.
+// GPIO15 est une broche de configuration au demarrage (MTDO) : maintenue
+// appuyee pendant un reset, elle coupe seulement les messages de la ROM sur
+// la console, sans autre effet.
+// ---------------------------------------------------------------------------
+
+/// Initialise le bouton home. Utiliser la macro `board_home!(peripherals)`.
+pub fn home_button(pin: GPIO15<'static>) -> crate::input::Button {
+    crate::input::Button::new(Input::new(pin, InputConfig::default().with_pull(Pull::Up)))
+}
+
+#[macro_export]
+macro_rules! board_home {
+    ($p:ident) => {
+        $crate::board::home_button($p.GPIO15)
+    };
+}
+
+// ---------------------------------------------------------------------------
 // Autres broches du schema, pas encore utilisees par le logiciel :
-//   VIBRATOR=GPIO33, SW_HOME=GPIO15 (bouton home),
+//   VIBRATOR=GPIO33 : grille de Q8 (2N7002, pull-down 100 kOhm R24) ; le drain
+//     n'est relie qu'a C18 (4,7 uF) vers 3V3 : moteur a brancher entre 3V3 et
+//     le drain. PAS de diode de roue libre, et 2N7002 un peu juste a 3,3 V de
+//     grille (Rds(on) de quelques ohms). Ne pas piloter avant d'avoir statue.
 //   SD_CS=GPIO4 et SPI_MISO=GPIO19 (carte SD, sur le meme bus SPI que l'ecran).
 // ---------------------------------------------------------------------------
 

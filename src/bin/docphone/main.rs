@@ -19,7 +19,8 @@ use esp32_quick::clock::{self, DateTime};
 use esp32_quick::display::Display;
 use esp32_quick::input::Input;
 use esp32_quick::lte::{Lte, Request};
-use esp32_quick::{board, board_console, board_display, board_led, board_lte, board_watchdog, system};
+use esp32_quick::input::ButtonEvent;
+use esp32_quick::{board, board_console, board_display, board_home, board_led, board_lte, board_watchdog, system};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -46,6 +47,9 @@ fn main() -> ! {
     // Signe de vie sans PC : 2 clignotements courts, 5 si le reset est anormal.
     let mut led = board_led!(peripherals);
     board::blink(&mut led, if abnormal { 5 } else { 2 }, 100);
+
+    // Bouton home (GPIO15) : pour l'instant, appuis affiches sur la console.
+    let mut home = board_home!(peripherals);
 
     // Redemarre la carte si la boucle principale se bloque plus de 10 s.
     let mut watchdog = board_watchdog!(peripherals);
@@ -92,6 +96,13 @@ fn main() -> ! {
         let now = clock::uptime_ms();
         if now >= next_tick {
             watchdog.feed();
+            match home.poll() {
+                Some(ButtonEvent::Pressed) => esp_println::println!("HOME : appui"),
+                Some(ButtonEvent::Released { held_ms }) => {
+                    esp_println::println!("HOME : relache (appuye {} ms)", held_ms)
+                }
+                None => {}
+            }
             launcher.tick();
             next_tick = now + TICK_MS;
         }
@@ -115,6 +126,18 @@ fn main() -> ! {
                     // TIME est une commande globale, valable dans toutes les apps.
                     if input == "TIME" || input.starts_with("TIME ") {
                         handle_time_command(input[4..].trim());
+                        length = 0;
+                        continue;
+                    }
+
+                    // Appels entrants (cf. lte.rs).
+                    if input.eq_ignore_ascii_case("DECROCHER") {
+                        let _ = lte.request(Request::Answer);
+                        length = 0;
+                        continue;
+                    }
+                    if input.eq_ignore_ascii_case("RACCROCHER") {
+                        let _ = lte.request(Request::HangUp);
                         length = 0;
                         continue;
                     }

@@ -14,6 +14,13 @@
 //! (`AT+CSMP=17,167,0,8`), pour que accents et emojis passent sans dependre de
 //! la conversion GSM du module ; limite a 70 caracteres (un seul SMS).
 //!
+//! Appels entrants (signalisation seulement, l'audio passe par le module) :
+//! `RING` a chaque sonnerie, `+CLIP: "<numero>",...` pour le numero
+//! (`AT+CLIP=1`), `NO CARRIER` / `VOICE CALL: END` a la fin. Decrocher
+//! (`ATA`) et raccrocher (`AT+CHUP`, qui raccroche toujours un appel vocal,
+//! contrairement a ATH qui depend de AT+CVHU) via `request()`. La broche RI du
+//! module n'est pas cablee : tout passe par l'UART.
+//!
 //! Tout est NON BLOQUANT : `Lte::poll()` est appele a chaque tour de la
 //! boucle principale et avance d'un pas (envoi d'une commande, lecture des
 //! lignes recues...) sans jamais attendre. L'interface reste utilisable et le
@@ -67,14 +74,20 @@ pub const NUMBER_MAX_LEN: usize = 16;
 /// Longueur affichee du texte dans la liste des SMS.
 const LIST_PREVIEW_CHARS: usize = 50;
 
-const CONFIGURE: [&str; 6] = [
+const CONFIGURE: [&str; 7] = [
     "ATE0",                // pas d'echo des commandes
     "AT+CTZU=1",           // heure reseau automatique (NITZ)
     "AT+CMGF=1",           // SMS en mode texte
     "AT+CSCS=\"UCS2\"",    // textes et numeros en UTF-16 hexadecimal
     "AT+CNMI=2,1,0,0,0",   // signaler les nouveaux SMS par +CMTI
     "AT+CSMP=17,167,0,8",  // SMS envoyes en UCS2 (dcs=8)
+    "AT+CLIP=1",           // numero de l'appelant (+CLIP) a chaque sonnerie
 ];
+/// Sans RING depuis ce delai, l'appelant a abandonne (appel manque). Le
+/// module repete RING toutes les ~3-6 s.
+const RING_TIMEOUT: Duration = Duration::from_secs(10);
+/// Delai de reponse a ATA (etablissement de l'appel).
+const ANSWER_TIMEOUT: Duration = Duration::from_secs(20);
 const REATTACH: [&str; 2] = ["AT+CFUN=0", "AT+CFUN=1"];
 /// Commandes de `Request::Status`, envoyees l'une apres l'autre (une erreur
 /// n'arrete pas la suite).
@@ -101,6 +114,21 @@ pub enum Request {
     /// Etat du module : SIM, reseau, operateur, signal, batterie,
     /// temperature (STATUS[etape]).
     Status(u8),
+    /// Decrocher l'appel entrant (ATA).
+    Answer,
+    /// Raccrocher (AT+CHUP).
+    HangUp,
+}
+
+/// Etat de l'appel vocal, suivi a part de `State` (le module peut lire
+/// l'heure ou un SMS pendant que le telephone sonne).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Call {
+    None,
+    /// Le telephone sonne depuis `since` ; dernier RING a `last_ring`.
+    Ringing { since: Instant, last_ring: Instant, rings: u16 },
+    /// Appel decroche a `since`.
+    Active { since: Instant },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -170,6 +198,9 @@ pub struct Lte {
     waiting_since: Option<Instant>,
     reattached: bool,
     synced_once: bool,
+    call: Call,
+    /// Numero de l'appelant (+CLIP), vide si inconnu ou masque.
+    caller: String<NUMBER_MAX_LEN>,
 }
 
 impl Lte {
@@ -196,12 +227,29 @@ impl Lte {
             waiting_since: None,
             reattached: false,
             synced_once: false,
+            call: Call::None,
+            caller: String::new(),
         }
     }
 
     /// Met une demande en file ; elle sera traitee des que le module est
     /// pret. Faux (et message) si le module est hors service ou la file pleine.
     pub fn request(&mut self, request: Request) -> bool {
+        match (request, self.call) {
+            (Request::Answer, Call::Active { .. }) => {
+                esp_println::println!("Appel deja en cours.");
+                return false;
+            }
+            (Request::Answer, Call::None) => {
+                esp_println::println!("Aucun appel entrant a decrocher.");
+                return false;
+            }
+            (Request::HangUp, Call::None) => {
+                esp_println::println!("Aucun appel en cours.");
+                return false;
+            }
+            _ => {}
+        }
         if self.state == State::Dead {
             esp_println::println!("LTE : module hors service (pas de reponse au demarrage).");
             return false;
@@ -254,6 +302,13 @@ impl Lte {
     pub fn poll(&mut self) -> Option<DateTime> {
         let now = Instant::now();
         self.read_lines();
+
+        // Plus de RING depuis RING_TIMEOUT : l'appelant a abandonne.
+        if let Call::Ringing { last_ring, .. } = self.call {
+            if now >= last_ring + RING_TIMEOUT {
+                self.end_call("Appel manque");
+            }
+        }
 
         // Une commande attend sa reponse : terminee, ou delai depasse ?
         if let Some(deadline) = self.deadline {
@@ -397,6 +452,15 @@ impl Lte {
                 .map_err(|_| ()),
             Request::DeleteSms(index) => core::fmt::write(&mut command, format_args!("AT+CMGD={}", index))
                 .map_err(|_| ()),
+            Request::Answer => {
+                esp_println::println!("Decrochage...");
+                self.send("ATA", ANSWER_TIMEOUT);
+                return;
+            }
+            Request::HangUp => {
+                self.send("AT+CHUP", SMS_TIMEOUT);
+                return;
+            }
             Request::Status(step) => {
                 if step == 0 {
                     esp_println::println!("--- Etat du module LTE ---");
@@ -430,6 +494,28 @@ impl Lte {
             self.list_plain = true;
             let _ = self.requests.push_front(Request::ListSms);
             return;
+        }
+        match request {
+            Request::Answer => {
+                if !failed && matches!(self.call, Call::Ringing { .. }) {
+                    self.call = Call::Active { since: Instant::now() };
+                    esp_println::println!("*** Appel en cours avec {} (RACCROCHER pour terminer) ***", self.caller_label());
+                } else if failed {
+                    esp_println::println!("Echec du decrochage : {}", self.error_label());
+                }
+                return;
+            }
+            Request::HangUp => {
+                if failed {
+                    esp_println::println!("Echec du raccrochage : {}", self.error_label());
+                } else if matches!(self.call, Call::Ringing { .. }) {
+                    self.end_call("Appel refuse");
+                } else if self.call != Call::None {
+                    self.end_call("Appel termine");
+                }
+                return;
+            }
+            _ => {}
         }
         if let Request::Status(step) = request {
             if failed {
@@ -465,6 +551,32 @@ impl Lte {
             _ if failed => esp_println::println!("LTE : le module a refuse la commande ({}).", self.error_label()),
             _ => {}
         }
+    }
+
+    /// Numero de l'appelant pour l'affichage.
+    fn caller_label(&self) -> &str {
+        if self.caller.is_empty() { "numero inconnu" } else { &self.caller }
+    }
+
+    /// Fin d'appel (ou d'appel manque) : message avec la duree, puis remise a zero.
+    fn end_call(&mut self, label: &str) {
+        let since = match self.call {
+            Call::None => return,
+            Call::Ringing { since, .. } | Call::Active { since } => since,
+        };
+        let seconds = (Instant::now() - since).as_secs();
+        let what = if matches!(self.call, Call::Ringing { .. }) { "sonnerie" } else { "duree" };
+        esp_println::println!();
+        esp_println::println!(
+            "*** {} : {} ({} {:02}:{:02}) ***",
+            label,
+            self.caller_label(),
+            what,
+            seconds / 60,
+            seconds % 60
+        );
+        self.call = Call::None;
+        self.caller.clear();
     }
 
     /// Derniere erreur du module, ou "pas de reponse" (delai depasse).
@@ -567,6 +679,51 @@ impl Lte {
             match body {
                 Body::Preview => esp_println::println!("     {}", Decoded::preview(line, LIST_PREVIEW_CHARS)),
                 _ => esp_println::println!("{}", Decoded::full(line)),
+            }
+            return;
+        }
+
+        // Appels : sonnerie, numero, fin d'appel.
+        if line == "RING" {
+            let now = Instant::now();
+            match self.call {
+                Call::None => {
+                    esp_println::println!();
+                    esp_println::println!("*** Appel entrant *** (DECROCHER ou RACCROCHER)");
+                    self.call = Call::Ringing { since: now, last_ring: now, rings: 1 };
+                }
+                Call::Ringing { since, rings, .. } => {
+                    self.call = Call::Ringing { since, last_ring: now, rings: rings + 1 };
+                }
+                Call::Active { .. } => {}
+            }
+            return;
+        }
+        if let Some(rest) = line.strip_prefix("+CLIP: ") {
+            // +CLIP: "<numero>",<type>,... (numero en UCS2 selon AT+CSCS)
+            if self.caller.is_empty() {
+                let number = split_fields(rest).first().copied().unwrap_or("");
+                let _ = core::fmt::write(&mut self.caller, format_args!("{}", Decoded::full(number)));
+                esp_println::println!("Appel de {}", self.caller_label());
+            }
+            return;
+        }
+        if line == "NO CARRIER" || line.starts_with("VOICE CALL: END") || line == "BUSY" {
+            // Reponse a ATA si l'appelant a raccroche entre-temps.
+            if matches!(self.state, State::Serving(Request::Answer)) {
+                self.got_error = true;
+                self.last_error.clear();
+                let _ = self.last_error.push_str("l'appelant a raccroche");
+            }
+            // Pendant notre AT+CHUP, la fin d'appel arrive avant le OK : c'est
+            // nous qui raccrochons, pas l'appelant.
+            let we_hung_up = matches!(self.state, State::Serving(Request::HangUp));
+            match self.call {
+                Call::Ringing { .. } if we_hung_up => self.end_call("Appel refuse"),
+                Call::Ringing { .. } => self.end_call("Appel manque"),
+                Call::Active { .. } if we_hung_up => self.end_call("Appel termine"),
+                Call::Active { .. } => self.end_call("L'appelant a raccroche"),
+                Call::None => {}
             }
             return;
         }

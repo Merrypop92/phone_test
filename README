@@ -17,6 +17,7 @@ Commandes serie globales (valables dans toutes les apps) :
 
     TIME [AAAA-MM-JJ HH:MM[:SS]]         # affiche / regle l'heure
     LTE                                  # etat du module : SIM, reseau, signal, batterie, temperature
+    DECROCHER / RACCROCHER               # appel entrant (affiche tout seul : *** Appel entrant ***)
     SMS                                  # liste les SMS stockes dans le module
     SMS LIRE <n>                         # affiche le SMS n en entier
     SMS SUPPR <n>                        # supprime le SMS n
@@ -39,6 +40,15 @@ Programmes de test du materiel (dossier examples/) :
     cargo run --example lte_charge_test  # PWRKEY du module LTE + detection de charge (ADC)
     cargo run --example lte_at_console   # module LTE : diagnostic SIM puis console AT interactive
 
+
+A valider sur la carte
+----------------------
+
+- [ ] Appels entrants (RING/+CLIP, DECROCHER / RACCROCHER, appel manque,
+      duree) : code ecrit, pas encore teste physiquement. Tests a faire :
+      laisser sonner puis raccrocher a distance, DECROCHER puis RACCROCHER,
+      raccrocher a distance pendant l'appel, RACCROCHER sans decrocher (refus),
+      commandes sans appel. Verifier aussi le format du numero (+CLIP).
 
 A faire (logiciel)
 ------------------
@@ -65,7 +75,17 @@ A souder :
 - [ ] RESET1 (bouton EN de l'ESP32) : pas soude. En attendant, `cargo run`
       redemarre la carte via le reset automatique de l'USB-serie.
 
-A corriger sur le schema / PCB (matrice de boutons TCA8418, U11) :
+A corriger sur le schema / PCB (V2) :
+- [ ] Vibreur : Q8 (2N7002) pilote le moteur depuis GPIO33, mais pas de
+      diode de roue libre aux bornes du moteur (seulement C18, 4,7 uF), et
+      pas de pastilles dediees. Ajouter une diode (ex. 1N4148 / BAT54) et un
+      MOSFET logique plus franc (ex. SI2302 / AO3400) pour un moteur ~80 mA.
+- [ ] GPIO39 "IS_CHARGING" n'est PAS l'etat de charge du TP4056 : c'est un
+      pont diviseur R4/R3 (10k/10k) sur le +5V USB, donc la presence de l'USB.
+      Pour l'etat de charge reel : relier CHRG/STDBY du TP4056 a des GPIO.
+
+Matrice de boutons TCA8418 (U11) : A SUPPRIMER en V2 (remplacee par l'ecran
+tactile FT6336U). Non testee, non corrigee ; pour memoire :
 - [ ] VCC (broche 21) n'est relie qu'a C_13, pas au 3V3 (confirme) : la puce
       n'est pas alimentee, d'ou l'absence de reponse I2C. Ajouter la liaison
       VCC -> 3V3 (sur cette carte : un fil ; verifier avec examples/i2c_scan.rs)
