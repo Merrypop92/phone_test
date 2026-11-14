@@ -7,11 +7,13 @@
 //! - `display` : ecran e-paper, zone de dessin, `Display`
 //! - `clock`   : heure et date
 //! - `input`   : entrees utilisateur (touches, texte), independantes de leur source
+//! - `system`  : raison du dernier redemarrage, detecteur de brownout
 
 pub mod board;
 pub mod clock;
 pub mod display;
 pub mod input;
+pub mod system;
 
 // Raccourcis : `esp32_quick::Epd` plutot que `esp32_quick::display::Epd`.
 pub use display::{

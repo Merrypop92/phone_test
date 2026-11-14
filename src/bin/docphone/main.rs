@@ -18,13 +18,33 @@ use esp_hal::main;
 use esp32_quick::clock::{self, DateTime};
 use esp32_quick::display::Display;
 use esp32_quick::input::Input;
-use esp32_quick::{board, board_console, board_display};
+use esp32_quick::{board, board_console, board_display, board_led, system};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[main]
 fn main() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
+    // Le plus tot possible : sans ca, un brownout n'est pas detecte (cf. system.rs).
+    system::enable_brownout_reset();
+    let (bod_on, bod_reset, bod_level) = system::brownout_status();
+    esp_println::println!(
+        "Detecteur de brownout : actif={} reset={} seuil={}",
+        bod_on, bod_reset, bod_level
+    );
+
+    let reason = system::reset_reason();
+    esp_println::println!(
+        "Demarrage. Dernier reset : {} ({:?}){}",
+        system::reset_reason_label(reason),
+        reason,
+        if system::reset_is_abnormal(reason) { "  <-- ANORMAL" } else { "" }
+    );
+
+    // Signe de vie sans PC : 2 clignotements courts, 5 si le reset est anormal.
+    let mut led = board_led!(peripherals);
+    let blinks = if system::reset_is_abnormal(reason) { 5 } else { 2 };
+    board::blink(&mut led, blinks, 100);
 
     let mut serial = board_console!(peripherals);
     // L'ecran est initialise au premier affichage (rafraichissement complet).

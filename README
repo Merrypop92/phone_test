@@ -46,6 +46,10 @@ Version actuelle :
       un redemarrage. En attendant, l'heure est reglee a la main avec la
       commande serie TIME et perdue a chaque redemarrage.
 
+A souder :
+- [ ] RESET1 (bouton EN de l'ESP32) : pas soude. En attendant, `cargo run`
+      redemarre la carte via le reset automatique de l'USB-serie.
+
 A corriger sur le schema / PCB (matrice de boutons TCA8418, U11) :
 - [ ] VCC (broche 21) n'est relie qu'a C_13, pas au 3V3 (confirme) : la puce
       n'est pas alimentee, d'ou l'absence de reponse I2C. Ajouter la liaison

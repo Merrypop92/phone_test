@@ -24,7 +24,7 @@ use esp_hal::analog::adc::{Adc, AdcConfig, AdcPin, Attenuation};
 use esp_hal::gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull};
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::peripherals::{
-    ADC1, GPIO1, GPIO2, GPIO3, GPIO5, GPIO12, GPIO13, GPIO18, GPIO21, GPIO22, GPIO23, GPIO25,
+    ADC1, GPIO1, GPIO2, GPIO3, GPIO5, GPIO12, GPIO13, GPIO14, GPIO18, GPIO21, GPIO22, GPIO23, GPIO25,
     GPIO26, GPIO27, GPIO32, GPIO39, I2C0, SPI2, UART0, UART1,
 };
 use esp_hal::spi::Mode;
@@ -182,8 +182,36 @@ macro_rules! board_charge_status {
 }
 
 // ---------------------------------------------------------------------------
+// LED : GPIO14 (suppose active a l'etat haut ; a confirmer sur le schema).
+// Attention : GPIO14 est aussi MTMS (JTAG) et sort un signal pendant le boot.
+// ---------------------------------------------------------------------------
+
+/// Initialise la LED, eteinte. Utiliser la macro `board_led!(peripherals)`.
+pub fn led(pin: GPIO14<'static>) -> Output<'static> {
+    Output::new(pin, Level::Low, OutputConfig::default())
+}
+
+#[macro_export]
+macro_rules! board_led {
+    ($p:ident) => {
+        $crate::board::led($p.GPIO14)
+    };
+}
+
+/// Fait clignoter la LED `count` fois (on/off de `ms` millisecondes), puis
+/// la laisse eteinte (economie de batterie).
+pub fn blink(led: &mut Output<'_>, count: u32, ms: u32) {
+    for _ in 0..count {
+        led.set_high();
+        delay_ms(ms);
+        led.set_low();
+        delay_ms(ms);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Autres broches du schema, pas encore utilisees par le logiciel :
-//   LED=GPIO14, VIBRATOR=GPIO33, SW_HOME=GPIO15 (bouton home),
+//   VIBRATOR=GPIO33, SW_HOME=GPIO15 (bouton home),
 //   SD_CS=GPIO4 et SPI_MISO=GPIO19 (carte SD, sur le meme bus SPI que l'ecran).
 // ---------------------------------------------------------------------------
 

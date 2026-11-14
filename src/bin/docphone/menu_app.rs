@@ -3,6 +3,7 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Triangle};
 use esp32_quick::FrameBuffer;
 use esp32_quick::clock;
+use esp32_quick::system;
 use esp32_quick::display::flap::{self, SMALL};
 use esp32_quick::input::{Input, Key};
 use heapless::String as HeapString;
@@ -88,7 +89,17 @@ impl MenuApp {
             flap::draw_text(canvas, &SMALL, name, LIST_LEFT, top);
         }
 
-        if clock::now().is_none() {
+        // Bas de l'ecran : un reset anormal (brownout, watchdog...) passe avant
+        // le rappel de reglage de l'heure.
+        let reason = system::reset_reason();
+        if system::reset_is_abnormal(reason) {
+            let mut warning = HeapString::<48>::new();
+            let _ = core::fmt::write(
+                &mut warning,
+                format_args!("Dernier reset : {}", system::reset_reason_label(reason)),
+            );
+            canvas.text_centered(&warning, 455);
+        } else if clock::now().is_none() {
             canvas.text_centered("Regler l'heure : TIME AAAA-MM-JJ HH:MM", 455);
         }
     }
