@@ -25,10 +25,10 @@ embedded-graphics = "0.8"
 heapless = "0.8"
 
 
-# Pile radio (WiFi/BLE) : seulement pour les exemples (examples/wifi_scan.rs),
+# Pile radio (WiFi/BLE) : seulement pour les exemples (wifi_scan, ble_scan),
 # le firmware docphone ne l'utilise pas.
 [dev-dependencies]
-esp-radio = { version = "0.18", features = ["esp32", "wifi", "unstable"] }
+esp-radio = { version = "0.18", features = ["esp32", "wifi", "ble", "unstable"] }
 esp-rtos = { version = "0.3", features = ["esp32", "esp-radio", "esp-alloc"] }
 esp-alloc = { version = "0.10", features = ["esp32"] }
 embassy-futures = "0.1"
