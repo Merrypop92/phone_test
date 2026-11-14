@@ -16,6 +16,10 @@ Compiler et flasher
 Commandes serie globales (valables dans toutes les apps) :
 
     TIME [AAAA-MM-JJ HH:MM[:SS]]         # affiche / regle l'heure
+    SMS                                  # liste les SMS stockes dans le module
+    SMS LIRE <n>                         # affiche le SMS n en entier
+    SMS SUPPR <n>                        # supprime le SMS n
+                                         # (un SMS recu s'affiche tout seul sur la console)
     TEST PANIC                           # panic volontaire -> redemarrage, "PANIC" au boot
     TEST HANG                            # blocage volontaire -> watchdog (10 s), "WATCHDOG" au boot
 

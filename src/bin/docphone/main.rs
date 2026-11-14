@@ -18,7 +18,7 @@ use esp_hal::main;
 use esp32_quick::clock::{self, DateTime};
 use esp32_quick::display::Display;
 use esp32_quick::input::Input;
-use esp32_quick::lte::Lte;
+use esp32_quick::lte::{Lte, Request};
 use esp32_quick::{board, board_console, board_display, board_led, board_lte, board_watchdog, system};
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -118,6 +118,15 @@ fn main() -> ! {
                         continue;
                     }
 
+                    // SMS : commandes globales, affichage sur la console (cf. lte.rs).
+                    if input.eq_ignore_ascii_case("SMS")
+                        || input.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("SMS "))
+                    {
+                        handle_sms_command(&mut lte, input[3..].trim());
+                        length = 0;
+                        continue;
+                    }
+
                     // Commandes de test des plantages (cf. system.rs, board.rs).
                     if input == "TEST PANIC" {
                         panic!("panic volontaire (commande TEST PANIC)");
@@ -173,5 +182,28 @@ fn handle_time_command(argument: &str) {
             clock::MIN_YEAR,
             clock::MAX_YEAR
         ),
+    }
+}
+
+/// `SMS` liste les SMS, `SMS LIRE <n>` en affiche un, `SMS SUPPR <n>` le
+/// supprime. Les reponses s'affichent quand le module a repondu.
+fn handle_sms_command(lte: &mut Lte, argument: &str) {
+    let mut words = argument.split_whitespace();
+    let action = words.next().unwrap_or("");
+    let number = words.next().and_then(|n| n.parse::<u16>().ok());
+    let request = if action.is_empty() {
+        Some(Request::ListSms)
+    } else if action.eq_ignore_ascii_case("LIRE") {
+        number.map(Request::ReadSms)
+    } else if action.eq_ignore_ascii_case("SUPPR") {
+        number.map(Request::DeleteSms)
+    } else {
+        None
+    };
+    match request {
+        Some(request) => {
+            let _ = lte.request(request);
+        }
+        None => esp_println::println!("Usage : SMS | SMS LIRE <n> | SMS SUPPR <n>"),
     }
 }
