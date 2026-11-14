@@ -19,6 +19,7 @@ Commandes serie globales (valables dans toutes les apps) :
     SMS                                  # liste les SMS stockes dans le module
     SMS LIRE <n>                         # affiche le SMS n en entier
     SMS SUPPR <n>                        # supprime le SMS n
+    SMS ENVOI <numero> <texte>           # envoie un SMS (70 caracteres max, accents/emojis OK)
                                          # (un SMS recu s'affiche tout seul sur la console)
     TEST PANIC                           # panic volontaire -> redemarrage, "PANIC" au boot
     TEST HANG                            # blocage volontaire -> watchdog (10 s), "WATCHDOG" au boot

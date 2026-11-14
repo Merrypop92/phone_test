@@ -83,7 +83,8 @@ fn main() -> ! {
     const TICK_MS: u64 = 20;
     let mut next_tick = 0u64;
 
-    let mut line = [0u8; 96];
+    // 200 octets : "SMS ENVOI <numero> " + 70 caracteres accentues (UTF-8).
+    let mut line = [0u8; 200];
     let mut length = 0usize;
     let mut byte = [0u8; 1];
 
@@ -186,11 +187,23 @@ fn handle_time_command(argument: &str) {
 }
 
 /// `SMS` liste les SMS, `SMS LIRE <n>` en affiche un, `SMS SUPPR <n>` le
-/// supprime. Les reponses s'affichent quand le module a repondu.
+/// supprime, `SMS ENVOI <numero> <texte>` en envoie un. Les reponses s'affichent quand le module a repondu.
 fn handle_sms_command(lte: &mut Lte, argument: &str) {
     let mut words = argument.split_whitespace();
     let action = words.next().unwrap_or("");
     let number = words.next().and_then(|n| n.parse::<u16>().ok());
+    if action.eq_ignore_ascii_case("ENVOI") {
+        // SMS ENVOI <numero> <texte> : le texte est tout ce qui suit le numero.
+        let rest = argument[action.len()..].trim_start();
+        let number = rest.split_whitespace().next().unwrap_or("");
+        let text = rest[number.len()..].trim();
+        if number.is_empty() || text.is_empty() {
+            esp_println::println!("Usage : SMS ENVOI <numero> <texte>");
+        } else {
+            let _ = lte.send_sms(number, text);
+        }
+        return;
+    }
     let request = if action.is_empty() {
         Some(Request::ListSms)
     } else if action.eq_ignore_ascii_case("LIRE") {
@@ -204,6 +217,6 @@ fn handle_sms_command(lte: &mut Lte, argument: &str) {
         Some(request) => {
             let _ = lte.request(request);
         }
-        None => esp_println::println!("Usage : SMS | SMS LIRE <n> | SMS SUPPR <n>"),
+        None => esp_println::println!("Usage : SMS | SMS LIRE <n> | SMS SUPPR <n> | SMS ENVOI <numero> <texte>"),
     }
 }

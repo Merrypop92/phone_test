@@ -10,7 +10,9 @@
 //! accents et emojis). Le module signale chaque nouveau SMS par
 //! `+CMTI: "SM",<n>` (`AT+CNMI=2,1`) : on le lit alors et on l'affiche sur la
 //! console. Les SMS restent stockes dans le module (lister, lire, supprimer
-//! avec `request()`).
+//! avec `request()`). Envoi avec `send_sms()` : toujours en UCS2
+//! (`AT+CSMP=17,167,0,8`), pour que accents et emojis passent sans dependre de
+//! la conversion GSM du module ; limite a 70 caracteres (un seul SMS).
 //!
 //! Tout est NON BLOQUANT : `Lte::poll()` est appele a chaque tour de la
 //! boucle principale et avance d'un pas (envoi d'une commande, lecture des
@@ -55,15 +57,23 @@ const MAX_POWER_ATTEMPTS: u8 = 3;
 /// Delai de reponse pour les commandes SMS (une longue liste peut prendre
 /// quelques secondes).
 const SMS_TIMEOUT: Duration = Duration::from_secs(10);
+/// Delai d'envoi d'un SMS (AT+CMGS : jusqu'a 60 s selon le reseau).
+const SEND_TIMEOUT: Duration = Duration::from_secs(60);
+/// Longueur maximale d'un SMS envoye, en unites UTF-16 (un SMS UCS2 = 140
+/// octets ; un emoji compte pour 2).
+pub const SMS_MAX_UNITS: usize = 70;
+/// Longueur maximale d'un numero (format international : + et 15 chiffres).
+pub const NUMBER_MAX_LEN: usize = 16;
 /// Longueur affichee du texte dans la liste des SMS.
 const LIST_PREVIEW_CHARS: usize = 50;
 
-const CONFIGURE: [&str; 5] = [
+const CONFIGURE: [&str; 6] = [
     "ATE0",                // pas d'echo des commandes
     "AT+CTZU=1",           // heure reseau automatique (NITZ)
     "AT+CMGF=1",           // SMS en mode texte
     "AT+CSCS=\"UCS2\"",    // textes et numeros en UTF-16 hexadecimal
     "AT+CNMI=2,1,0,0,0",   // signaler les nouveaux SMS par +CMTI
+    "AT+CSMP=17,167,0,8",  // SMS envoyes en UCS2 (dcs=8)
 ];
 const REATTACH: [&str; 2] = ["AT+CFUN=0", "AT+CFUN=1"];
 
@@ -76,6 +86,8 @@ pub enum Request {
     ReadSms(u16),
     /// Supprimer le SMS numero n.
     DeleteSms(u16),
+    /// Envoyer le SMS prepare par `send_sms()`.
+    SendSms,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -132,6 +144,13 @@ pub struct Lte {
     /// module ; bascule automatique si la forme UCS2 est refusee).
     list_plain: bool,
     requests: Deque<Request, 8>,
+    /// SMS a envoyer (numero, texte), un seul a la fois.
+    outgoing: Option<(String<NUMBER_MAX_LEN>, String<{ SMS_MAX_UNITS * 4 }>)>,
+    /// AT+CMGS envoye : le module va repondre "> " (sans fin de ligne), et
+    /// on enverra alors le texte.
+    awaiting_prompt: bool,
+    /// Derniere ligne d'erreur du module (ex. "+CMS ERROR: 500").
+    last_error: String<48>,
     next_clock_read: Instant,
     power_attempts: u8,
     /// Debut de l'attente de l'heure (pour REATTACH_AFTER).
@@ -156,6 +175,9 @@ impl Lte {
             listed: 0,
             list_plain: false,
             requests: Deque::new(),
+            outgoing: None,
+            awaiting_prompt: false,
+            last_error: String::new(),
             next_clock_read: Instant::now(),
             power_attempts: 0,
             waiting_since: None,
@@ -181,6 +203,39 @@ impl Lte {
         true
     }
 
+    /// Prepare l'envoi d'un SMS. Faux (et message) si le numero ou le texte
+    /// est invalide, ou si un envoi est deja en cours.
+    pub fn send_sms(&mut self, number: &str, text: &str) -> bool {
+        let digits = number.strip_prefix('+').unwrap_or(number);
+        if digits.len() < 3 || number.len() > NUMBER_MAX_LEN || !digits.bytes().all(|b| b.is_ascii_digit()) {
+            esp_println::println!("Numero invalide : {} (ex. +33612345678 ou 0612345678).", number);
+            return false;
+        }
+        let units = text.encode_utf16().count();
+        if units == 0 || units > SMS_MAX_UNITS {
+            esp_println::println!(
+                "Texte de {} caracteres : entre 1 et {} (un emoji compte pour 2).",
+                units,
+                SMS_MAX_UNITS
+            );
+            return false;
+        }
+        if self.outgoing.is_some() {
+            esp_println::println!("Un SMS est deja en cours d'envoi, reessaie dans un instant.");
+            return false;
+        }
+        let (Ok(number), Ok(text)) = (String::try_from(number), String::try_from(text)) else {
+            esp_println::println!("Texte trop long.");
+            return false;
+        };
+        self.outgoing = Some((number, text));
+        if !self.request(Request::SendSms) {
+            self.outgoing = None;
+            return false;
+        }
+        true
+    }
+
     /// Avance d'un pas. Renvoie l'heure du reseau quand elle vient d'etre lue
     /// (a la premiere synchronisation puis toutes les heures).
     pub fn poll(&mut self) -> Option<DateTime> {
@@ -193,6 +248,11 @@ impl Lte {
                 return None;
             }
             self.deadline = None;
+            if self.awaiting_prompt {
+                // Invite "> " jamais recue : ESC annule la saisie cote module.
+                self.awaiting_prompt = false;
+                let _ = self.uart.write(&[0x1B]);
+            }
             return self.on_response(now);
         }
 
@@ -308,7 +368,7 @@ impl Lte {
     }
 
     fn send_request(&mut self, request: Request) {
-        let mut command = String::<24>::new();
+        let mut command = String::<96>::new();
         let _ = match request {
             Request::ListSms => {
                 self.listed = 0;
@@ -324,8 +384,24 @@ impl Lte {
                 .map_err(|_| ()),
             Request::DeleteSms(index) => core::fmt::write(&mut command, format_args!("AT+CMGD={}", index))
                 .map_err(|_| ()),
+            Request::SendSms => {
+                let Some((number, _)) = &self.outgoing else {
+                    self.state = State::Idle;
+                    return;
+                };
+                esp_println::println!("Envoi du SMS a {}...", number);
+                // Numero en UCS2, comme tous les parametres texte (AT+CSCS).
+                let _ = command.push_str("AT+CMGS=\"");
+                let _ = write_ucs2_hex(&mut command, number);
+                command.push_str("\"")
+            }
         };
-        self.send(&command, SMS_TIMEOUT);
+        if request == Request::SendSms {
+            self.send(&command, SEND_TIMEOUT);
+            self.awaiting_prompt = true;
+        } else {
+            self.send(&command, SMS_TIMEOUT);
+        }
     }
 
     fn finish_request(&mut self, request: Request) {
@@ -334,6 +410,16 @@ impl Lte {
             // Forme UCS2 refusee : on retente tout de suite avec "ALL" en clair.
             self.list_plain = true;
             let _ = self.requests.push_front(Request::ListSms);
+            return;
+        }
+        if request == Request::SendSms {
+            if let Some((number, _)) = self.outgoing.take() {
+                if failed {
+                    esp_println::println!("Echec de l'envoi a {} : {}", number, self.error_label());
+                } else {
+                    esp_println::println!("SMS envoye a {}.", number);
+                }
+            }
             return;
         }
         match request {
@@ -346,8 +432,19 @@ impl Lte {
             Request::DeleteSms(index) if !failed => esp_println::println!("SMS {} supprime.", index),
             Request::ReadSms(index) if failed => esp_println::println!("SMS {} : introuvable.", index),
             _ if failed && !self.got_error => esp_println::println!("LTE : pas de reponse du module."),
-            _ if failed => esp_println::println!("LTE : le module a refuse la commande."),
+            _ if failed => esp_println::println!("LTE : le module a refuse la commande ({}).", self.error_label()),
             _ => {}
+        }
+    }
+
+    /// Derniere erreur du module, ou "pas de reponse" (delai depasse).
+    fn error_label(&self) -> &str {
+        if !self.got_error {
+            "pas de reponse du module"
+        } else if self.last_error.is_empty() {
+            "ERROR"
+        } else {
+            &self.last_error
         }
     }
 
@@ -374,10 +471,23 @@ impl Lte {
     fn send(&mut self, command: &str, timeout: Duration) {
         self.got_ok = false;
         self.got_error = false;
+        self.last_error.clear();
         self.body = Body::None;
         let _ = self.uart.write(command.as_bytes());
         let _ = self.uart.write(b"\r\n");
         self.deadline = Some(Instant::now() + timeout);
+    }
+
+    /// Ecrit le texte du SMS en UCS2 hexadecimal, puis Ctrl+Z (envoi).
+    fn write_outgoing_text(&mut self) {
+        let Some((_, text)) = &self.outgoing else {
+            let _ = self.uart.write(&[0x1B]); // rien a envoyer : annule
+            return;
+        };
+        let mut hex = String::<{ SMS_MAX_UNITS * 4 }>::new();
+        let _ = write_ucs2_hex(&mut hex, text);
+        let _ = self.uart.write(hex.as_bytes());
+        let _ = self.uart.write(&[0x1A]);
     }
 
     /// Lit les octets recus et traite chaque ligne complete.
@@ -400,6 +510,13 @@ impl Lte {
                     // Ligne trop longue : la fin est perdue.
                     _ => {
                         let _ = self.line.push(byte);
+                        // Invite de saisie du texte apres AT+CMGS ("> ", sans
+                        // fin de ligne) : texte en UCS2 puis Ctrl+Z pour envoyer.
+                        if self.awaiting_prompt && self.line.as_slice() == b"> " {
+                            self.awaiting_prompt = false;
+                            self.line.clear();
+                            self.write_outgoing_text();
+                        }
                     }
                 }
             }
@@ -428,6 +545,8 @@ impl Lte {
             self.got_ok = true;
         } else if line == "ERROR" || line.starts_with("+CME ERROR") || line.starts_with("+CMS ERROR") {
             self.got_error = true;
+            self.last_error.clear();
+            let _ = self.last_error.push_str(&line[..line.len().min(48)]);
         } else if let Some(rest) = line.strip_prefix("+CCLK: ") {
             self.clock_reading = parse_cclk(rest);
         } else if let Some(rest) = line.strip_prefix("+CMTI: ") {
@@ -461,6 +580,14 @@ impl Lte {
         }
         // Autres messages spontanes (+CTZV, SMS DONE, +CGEV...) : ignores.
     }
+}
+
+/// Ecrit `text` en UCS2 hexadecimal (UTF-16, 4 chiffres par unite).
+fn write_ucs2_hex(out: &mut impl core::fmt::Write, text: &str) -> core::fmt::Result {
+    for unit in text.encode_utf16() {
+        write!(out, "{:04X}", unit)?;
+    }
+    Ok(())
 }
 
 /// Decoupe "a","b",c en champs (virgules hors guillemets), sans guillemets.
