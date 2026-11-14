@@ -45,6 +45,10 @@ Programmes de test du materiel (dossier examples/) :
     cargo run --release --example ble_scan    # Bluetooth LE : appareils autour (HCI direct, sans pile BLE)
 
 
+Checklist de la V2 du PCB : voir CHECKLIST_V2.md (corrections issues des
+tests de la V1, budget de GPIO, ajouts prevus).
+
+
 A valider sur la carte
 ----------------------
 
