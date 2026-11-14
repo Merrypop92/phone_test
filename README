@@ -40,6 +40,8 @@ Programmes de test du materiel (dossier examples/) :
     cargo run --example i2c_scan         # diagnostic du bus I2C / soudure du TCA8418
     cargo run --example lte_charge_test  # PWRKEY du module LTE + detection de l'USB (ADC GPIO39)
     cargo run --example lte_at_console   # module LTE : diagnostic SIM puis console AT interactive
+    cargo run --release --example psram_test  # PSRAM du WROVER : taille, ecriture/relecture, debit
+    cargo run --release --example wifi_scan   # radio WiFi + tenue du 3V3 sous charge radio (brownout surveille)
 
 
 A valider sur la carte
@@ -71,6 +73,14 @@ Version actuelle :
       compilation, ou commande serie TIME.
 - [ ] RTC externe sur pile (ex. DS3231), prochaine version du materiel :
       garder l'heure sans reseau et quand le telephone est eteint.
+
+A ajouter :
+- [x] Antenne WiFi 2,4 GHz sur le connecteur u.FL (IPEX MHF1) du module :
+      c'est un ESP32-WROVER-IE (pas d'antenne integree ; le symbole du schema
+      indique WROVER-B, a corriger). Sans antenne : 0 a 3 reseaux par scan ;
+      avec une antenne WiFi adhesive 2,4/5 GHz : 19 reseaux, meilleur -38 dBm.
+- [ ] V2 : antenne LTE large bande (~698-960 et 1710-2690 MHz) pour le
+      A7682E ; une antenne WiFi capte mal les bandes basses (800 MHz, B20).
 
 A souder :
 - [ ] RESET1 (bouton EN de l'ESP32) : pas soude. En attendant, `cargo run`

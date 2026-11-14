@@ -11,4 +11,5 @@ rustflags = [
 target = "xtensa-esp32-none-elf"
 
 [unstable]
-build-std = ["core"]
+# alloc : pour la pile radio des exemples (esp-radio, esp-alloc).
+build-std = ["alloc", "core"]

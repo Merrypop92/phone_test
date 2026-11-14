@@ -25,6 +25,14 @@ embedded-graphics = "0.8"
 heapless = "0.8"
 
 
+# Pile radio (WiFi/BLE) : seulement pour les exemples (examples/wifi_scan.rs),
+# le firmware docphone ne l'utilise pas.
+[dev-dependencies]
+esp-radio = { version = "0.18", features = ["esp32", "wifi", "unstable"] }
+esp-rtos = { version = "0.3", features = ["esp32", "esp-radio", "esp-alloc"] }
+esp-alloc = { version = "0.10", features = ["esp32"] }
+embassy-futures = "0.1"
+
 # For fine tuning these settings, please refer to https://doc.rust-lang.org/cargo/reference/profiles.html
 [profile.dev]
 # The default debug profile is too slow and too big for resource-constrained devices.
@@ -36,3 +44,8 @@ codegen-units = 1     # LLVM can perform better optimizations using a single thr
 debug         = 2     # prefer slower builds but better debugging experience
 lto           = 'fat'
 opt-level     = 's'
+
+# esp-radio doit etre optimise, meme en debug (sinon la radio peut ne pas
+# fonctionner, cf. documentation d'esp-radio).
+[profile.dev.package.esp-radio]
+opt-level = 3
