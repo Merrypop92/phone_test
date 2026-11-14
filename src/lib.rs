@@ -8,11 +8,13 @@
 //! - `clock`   : heure et date
 //! - `input`   : entrees utilisateur (touches, texte), independantes de leur source
 //! - `system`  : raison du dernier redemarrage, detecteur de brownout
+//! - `lte`     : module LTE A7682E (allumage, heure reseau)
 
 pub mod board;
 pub mod clock;
 pub mod display;
 pub mod input;
+pub mod lte;
 pub mod system;
 
 // Raccourcis : `esp32_quick::Epd` plutot que `esp32_quick::display::Epd`.

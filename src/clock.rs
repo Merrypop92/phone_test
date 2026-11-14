@@ -1,9 +1,11 @@
 //! Heure et date du DocPhone.
 //!
-//! Solution de depannage en attendant un RTC externe (ou le GPS) : l'heure est
-//! reglee a la main (commande serie `TIME`), puis on y ajoute le temps ecoule
-//! depuis le demarrage (compteur interne de l'ESP32). Elle est perdue au
-//! redemarrage et derive de quelques secondes par jour.
+//! Source de l'heure : le reseau mobile (module LTE, cf. lte.rs), lue au
+//! demarrage puis toutes les heures. En attendant, heure de compilation, ou
+//! reglage a la main (commande serie `TIME`). On y ajoute le temps ecoule
+//! depuis le reglage (compteur interne de l'ESP32, derive de quelques
+//! secondes par jour, corrigee a chaque resynchronisation). Un RTC externe est
+//! prevu sur une prochaine version du materiel.
 //!
 //! Pour brancher plus tard une autre source (RTC, GPS), il suffira d'appeler
 //! `set()` avec l'heure lue : les apps n'utilisent que `now()`.

@@ -49,9 +49,11 @@ Version actuelle :
 - [ ] LED de charge : savoir si le telephone est en charge
 - [ ] Accelerometre + gyroscope (centrale inertielle)
 - [ ] Boutons de volume (+ / -)
-- [ ] RTC externe sur pile (ex. DS3231) : garder l'heure eteint ou apres
-      un redemarrage. En attendant, l'heure est reglee a la main avec la
-      commande serie TIME et perdue a chaque redemarrage.
+- [x] Heure : fournie par le reseau mobile (module LTE, NITZ), lue au
+      demarrage puis toutes les heures (src/lte.rs). Sans reseau : heure de
+      compilation, ou commande serie TIME.
+- [ ] RTC externe sur pile (ex. DS3231), prochaine version du materiel :
+      garder l'heure sans reseau et quand le telephone est eteint.
 
 A souder :
 - [ ] RESET1 (bouton EN de l'ESP32) : pas soude. En attendant, `cargo run`

@@ -18,7 +18,8 @@ use esp_hal::main;
 use esp32_quick::clock::{self, DateTime};
 use esp32_quick::display::Display;
 use esp32_quick::input::Input;
-use esp32_quick::{board, board_console, board_display, board_led, board_watchdog, system};
+use esp32_quick::lte::Lte;
+use esp32_quick::{board, board_console, board_display, board_led, board_lte, board_watchdog, system};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -50,6 +51,9 @@ fn main() -> ! {
     let mut watchdog = board_watchdog!(peripherals);
 
     let mut serial = board_console!(peripherals);
+    // Module LTE : allumage et heure reseau, en tache de fond (cf. lte.rs).
+    let (lte_uart, lte_pwrkey) = board_lte!(peripherals);
+    let mut lte = Lte::new(lte_uart, lte_pwrkey);
     // L'ecran est initialise au premier affichage (rafraichissement complet).
     let display = Display::new(board_display!(peripherals), board::frame_buffer());
 
@@ -89,6 +93,12 @@ fn main() -> ! {
             watchdog.feed();
             launcher.tick();
             next_tick = now + TICK_MS;
+        }
+
+        // L'heure reseau remplace l'heure de compilation (ou celle de TIME) ;
+        // le menu et l'horloge se mettent a jour d'eux-memes au tick suivant.
+        if let Some(network_time) = lte.poll() {
+            clock::set(network_time);
         }
 
         if !serial.read_ready() {
