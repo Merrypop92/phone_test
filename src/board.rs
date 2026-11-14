@@ -161,29 +161,67 @@ macro_rules! board_lte {
 }
 
 // ---------------------------------------------------------------------------
-// Etat de charge : sortie STATUS/CHRG du TP4056 sur GPIO39 (ADC1, 11 dB)
-// cf. PaxOS-9 (PIN_BATTERY_CHARGING_STATUS). Valide : lecture brute ~2950 en charge.
+// Detection de l'USB : GPIO39 ("IS_CHARGING" sur le schema), ADC1 a 11 dB.
+// ATTENTION, malgre son nom, ce n'est PAS l'etat de charge du TP4056 : c'est
+// un pont diviseur R4/R3 (10k/10k) sur le +5V de l'USB. USB branche : ~2,5 V
+// (lecture brute ~2950) ; debranche : ~0 V. Les sorties CHRG/STDBY du TP4056
+// ne sont reliees a aucune broche (a corriger en V2, cf. README).
 // ---------------------------------------------------------------------------
 
-pub type ChargeStatusPin = AdcPin<GPIO39<'static>, ADC1<'static>>;
+/// Seuils (lecture brute de l'ADC, 0..4095) avec hysteresis, pour ne pas
+/// osciller autour d'une valeur unique.
+const USB_ON_ABOVE: u16 = 1500;
+const USB_OFF_BELOW: u16 = 800;
 
-/// Initialise l'ADC de detection de charge. Lire avec
-/// `nb::block!(adc.read_oneshot(&mut pin))`. Utiliser `board_charge_status!(peripherals)`.
-pub fn charge_status(adc: ADC1<'static>, pin: GPIO39<'static>) -> (Adc<'static, ADC1<'static>, Blocking>, ChargeStatusPin) {
+/// Detection de la presence de l'USB (+5V). Appeler `poll()` regulierement.
+pub struct UsbSense {
+    adc: Adc<'static, ADC1<'static>, Blocking>,
+    pin: AdcPin<GPIO39<'static>, ADC1<'static>>,
+    present: bool,
+}
+
+impl UsbSense {
+    /// Lecture brute de l'ADC (0..4095).
+    pub fn raw(&mut self) -> u16 {
+        nb::block!(self.adc.read_oneshot(&mut self.pin)).unwrap_or(0)
+    }
+
+    /// USB branche (dernier etat valide).
+    pub fn is_present(&self) -> bool {
+        self.present
+    }
+
+    /// Lit l'ADC ; renvoie `Some(branche)` quand l'etat change.
+    pub fn poll(&mut self) -> Option<bool> {
+        let raw = self.raw();
+        let present = if self.present { raw >= USB_OFF_BELOW } else { raw > USB_ON_ABOVE };
+        if present == self.present {
+            return None;
+        }
+        self.present = present;
+        Some(present)
+    }
+}
+
+/// Initialise la detection de l'USB. Utiliser la macro `board_usb_sense!(peripherals)`.
+pub fn usb_sense(adc: ADC1<'static>, pin: GPIO39<'static>) -> UsbSense {
     let mut config = AdcConfig::new();
     let pin = config.enable_pin(pin, Attenuation::_11dB);
-    (Adc::new(adc, config), pin)
+    let mut sense = UsbSense { adc: Adc::new(adc, config), pin, present: false };
+    let raw = sense.raw();
+    sense.present = raw > USB_ON_ABOVE;
+    sense
 }
 
 #[macro_export]
-macro_rules! board_charge_status {
+macro_rules! board_usb_sense {
     ($p:ident) => {
-        $crate::board::charge_status($p.ADC1, $p.GPIO39)
+        $crate::board::usb_sense($p.ADC1, $p.GPIO39)
     };
 }
 
 // ---------------------------------------------------------------------------
-// LED : GPIO14 (suppose active a l'etat haut ; a confirmer sur le schema).
+// LED : GPIO14 -> R6 (680 Ohm) -> LED1 (blanche) -> masse : active a l'etat haut.
 // Attention : GPIO14 est aussi MTMS (JTAG) et sort un signal pendant le boot.
 // ---------------------------------------------------------------------------
 

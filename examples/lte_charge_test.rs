@@ -8,7 +8,7 @@
 #![deny(clippy::large_stack_frames)]
 
 use esp32_quick::board::delay_ms;
-use esp32_quick::{board_charge_status, board_lte};
+use esp32_quick::{board_lte, board_usb_sense};
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::Level;
 use esp_hal::main;
@@ -31,7 +31,7 @@ fn main() -> ! {
 
     // Detection de charge (TP4056 STATUS/CHRG sur GPIO39) et module LTE (A7682E,
     // UART1 + PWRKEY) : cablage et notes dans src/board.rs.
-    let (mut adc1, mut charge_status_pin) = board_charge_status!(peripherals);
+    let mut usb = board_usb_sense!(peripherals);
     let (mut lte_uart, mut pwrkey) = board_lte!(peripherals);
 
     // --- Phase 1 : test PWRKEY mesurable au multimètre ---
@@ -62,8 +62,8 @@ fn main() -> ! {
 
         let mut got_ok = false;
         for _ in 0..10 {
-            let raw: u16 = nb::block!(adc1.read_oneshot(&mut charge_status_pin)).unwrap_or(0);
-            esp_println::println!("charge raw={raw} charging={}", raw > 100);
+            let raw: u16 = usb.raw();
+            esp_println::println!("USB (GPIO39) raw={raw} branche={}", raw > 1500);
 
             let _ = lte_uart.write(b"AT\r\n");
             let _ = lte_uart.flush();

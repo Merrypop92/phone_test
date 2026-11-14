@@ -20,13 +20,17 @@ use esp32_quick::display::Display;
 use esp32_quick::input::Input;
 use esp32_quick::lte::{Lte, Request};
 use esp32_quick::input::ButtonEvent;
-use esp32_quick::{board, board_console, board_display, board_home, board_led, board_lte, board_watchdog, system};
+use esp32_quick::{board, board_console, board_display, board_home, board_led, board_lte, board_usb_sense, board_watchdog, system};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[main]
 fn main() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
+    // La console (UART0) EN PREMIER : son initialisation vide le tampon d'envoi
+    // de l'UART, ce qui couperait un message affiche juste avant.
+    let mut serial = board_console!(peripherals);
+
     // Le plus tot possible : lit la trace de panic et active le detecteur de
     // brownout (sans ca, un brownout n'est pas detecte, cf. system.rs).
     system::init();
@@ -51,10 +55,19 @@ fn main() -> ! {
     // Bouton home (GPIO15) : pour l'instant, appuis affiches sur la console.
     let mut home = board_home!(peripherals);
 
+    // Presence de l'USB (GPIO39) : verifiee toutes les 500 ms.
+    let mut usb = board_usb_sense!(peripherals);
+    let usb_raw = usb.raw();
+    esp_println::println!(
+        "USB : {} (GPIO39 brut {})",
+        if usb.is_present() { "branche" } else { "debranche" },
+        usb_raw
+    );
+    let mut next_usb_check = 0u64;
+
     // Redemarre la carte si la boucle principale se bloque plus de 10 s.
     let mut watchdog = board_watchdog!(peripherals);
 
-    let mut serial = board_console!(peripherals);
     // Module LTE : allumage et heure reseau, en tache de fond (cf. lte.rs).
     let (lte_uart, lte_pwrkey) = board_lte!(peripherals);
     let mut lte = Lte::new(lte_uart, lte_pwrkey);
@@ -103,6 +116,25 @@ fn main() -> ! {
                 }
                 None => {}
             }
+            if now >= next_usb_check {
+                next_usb_check = now + 500;
+                if let Some(present) = usb.poll() {
+                    // Temoin visible sans console (la console part avec l'USB) :
+                    // LED allumee tant que l'USB est debranche. A retirer pour
+                    // l'autonomie une fois la detection validee.
+                    if present {
+                        led.set_low();
+                    } else {
+                        led.set_high();
+                    }
+                    let raw = usb.raw();
+                    esp_println::println!(
+                        "USB : {} (GPIO39 brut {})",
+                        if present { "branche" } else { "debranche" },
+                        raw
+                    );
+                }
+            }
             launcher.tick();
             next_tick = now + TICK_MS;
         }
@@ -126,6 +158,18 @@ fn main() -> ! {
                     // TIME est une commande globale, valable dans toutes les apps.
                     if input == "TIME" || input.starts_with("TIME ") {
                         handle_time_command(input[4..].trim());
+                        length = 0;
+                        continue;
+                    }
+
+                    // USB : lecture instantanee de GPIO39.
+                    if input.eq_ignore_ascii_case("USB") {
+                        let raw = usb.raw();
+                        esp_println::println!(
+                            "USB : {} (GPIO39 brut {}, seuils 800/1500)",
+                            if usb.is_present() { "branche" } else { "debranche" },
+                            raw
+                        );
                         length = 0;
                         continue;
                     }
