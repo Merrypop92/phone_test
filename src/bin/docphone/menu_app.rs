@@ -91,12 +91,11 @@ impl MenuApp {
 
         // Bas de l'ecran : un reset anormal (brownout, watchdog...) passe avant
         // le rappel de reglage de l'heure.
-        let reason = system::reset_reason();
-        if system::reset_is_abnormal(reason) {
+        if system::last_reset_abnormal() {
             let mut warning = HeapString::<48>::new();
             let _ = core::fmt::write(
                 &mut warning,
-                format_args!("Dernier reset : {}", system::reset_reason_label(reason)),
+                format_args!("Dernier reset : {}", system::last_reset_label()),
             );
             canvas.text_centered(&warning, 455);
         } else if clock::now().is_none() {

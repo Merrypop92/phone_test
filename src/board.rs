@@ -25,11 +25,12 @@ use esp_hal::gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull};
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::peripherals::{
     ADC1, GPIO1, GPIO2, GPIO3, GPIO5, GPIO12, GPIO13, GPIO14, GPIO18, GPIO21, GPIO22, GPIO23, GPIO25,
-    GPIO26, GPIO27, GPIO32, GPIO39, I2C0, SPI2, UART0, UART1,
+    GPIO26, GPIO27, GPIO32, GPIO39, I2C0, SPI2, TIMG0, UART0, UART1,
 };
 use esp_hal::spi::Mode;
 use esp_hal::spi::master::{Config as SpiConfig, Spi};
-use esp_hal::time::Rate;
+use esp_hal::time::{Duration, Rate};
+use esp_hal::timer::timg::{MwdtStage, TimerGroup, Wdt};
 use esp_hal::uart::{Config as UartConfig, Uart};
 
 use crate::{BUF_SIZE, Epd};
@@ -216,6 +217,32 @@ pub fn blink(led: &mut Output<'_>, count: u32, ms: u32) {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
+// Watchdog : celui du groupe de timers 0 (MWDT0). S'il n'est pas "nourri"
+// (`feed()`) pendant WATCHDOG_TIMEOUT_S, il redemarre la puce ; la raison
+// lue au demarrage suivant est alors WATCHDOG.
+// Le delai doit depasser la plus longue attente normale : un rafraichissement
+// complet de l'e-paper bloque ~3,5 s (plus par temps froid).
+// ---------------------------------------------------------------------------
+
+pub const WATCHDOG_TIMEOUT_S: u64 = 10;
+
+/// Demarre le watchdog. Appeler `feed()` regulierement dans la boucle
+/// principale. Utiliser la macro `board_watchdog!(peripherals)`.
+pub fn watchdog(timg: TIMG0<'static>) -> Wdt<TIMG0<'static>> {
+    let mut wdt = TimerGroup::new(timg).wdt;
+    wdt.set_timeout(MwdtStage::Stage0, Duration::from_secs(WATCHDOG_TIMEOUT_S));
+    wdt.enable();
+    wdt
+}
+
+#[macro_export]
+macro_rules! board_watchdog {
+    ($p:ident) => {
+        $crate::board::watchdog($p.TIMG0)
+    };
+}
+
+// ---------------------------------------------------------------------------
 // Tampon d'image plein ecran (48 Ko, 1 bit par pixel)
 // ---------------------------------------------------------------------------
 
@@ -241,8 +268,15 @@ pub fn delay_ms(ms: u32) {
     esp_hal::delay::Delay::new().delay_millis(ms);
 }
 
+/// En cas de panic : message sur la console, marqueur en RAM RTC (pour
+/// afficher "PANIC" au demarrage suivant), puis redemarrage. La pause de 2 s
+/// laisse le temps de lire le message et evite une boucle de redemarrages trop
+/// rapide si la panic se reproduit a chaque demarrage.
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     esp_println::println!("PANIC: {}", info);
-    loop {}
+    esp_println::println!("Redemarrage dans 2 s...");
+    crate::system::record_panic();
+    delay_ms(2000);
+    esp_hal::system::software_reset()
 }

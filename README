@@ -13,6 +13,12 @@ Compiler et flasher
     cargo check --bin docphone           # verification
     cargo run --bin docphone             # flash + moniteur serie (espflash)
 
+Commandes serie globales (valables dans toutes les apps) :
+
+    TIME [AAAA-MM-JJ HH:MM[:SS]]         # affiche / regle l'heure
+    TEST PANIC                           # panic volontaire -> redemarrage, "PANIC" au boot
+    TEST HANG                            # blocage volontaire -> watchdog (10 s), "WATCHDOG" au boot
+
 Programmes de test du materiel (dossier examples/) :
 
     cargo run --example epaper_demo      # modes de rafraichissement e-paper

@@ -18,33 +18,36 @@ use esp_hal::main;
 use esp32_quick::clock::{self, DateTime};
 use esp32_quick::display::Display;
 use esp32_quick::input::Input;
-use esp32_quick::{board, board_console, board_display, board_led, system};
+use esp32_quick::{board, board_console, board_display, board_led, board_watchdog, system};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[main]
 fn main() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
-    // Le plus tot possible : sans ca, un brownout n'est pas detecte (cf. system.rs).
-    system::enable_brownout_reset();
+    // Le plus tot possible : lit la trace de panic et active le detecteur de
+    // brownout (sans ca, un brownout n'est pas detecte, cf. system.rs).
+    system::init();
     let (bod_on, bod_reset, bod_level) = system::brownout_status();
     esp_println::println!(
         "Detecteur de brownout : actif={} reset={} seuil={}",
         bod_on, bod_reset, bod_level
     );
 
-    let reason = system::reset_reason();
+    let abnormal = system::last_reset_abnormal();
     esp_println::println!(
         "Demarrage. Dernier reset : {} ({:?}){}",
-        system::reset_reason_label(reason),
-        reason,
-        if system::reset_is_abnormal(reason) { "  <-- ANORMAL" } else { "" }
+        system::last_reset_label(),
+        system::reset_reason(),
+        if abnormal { "  <-- ANORMAL" } else { "" }
     );
 
     // Signe de vie sans PC : 2 clignotements courts, 5 si le reset est anormal.
     let mut led = board_led!(peripherals);
-    let blinks = if system::reset_is_abnormal(reason) { 5 } else { 2 };
-    board::blink(&mut led, blinks, 100);
+    board::blink(&mut led, if abnormal { 5 } else { 2 }, 100);
+
+    // Redemarre la carte si la boucle principale se bloque plus de 10 s.
+    let mut watchdog = board_watchdog!(peripherals);
 
     let mut serial = board_console!(peripherals);
     // L'ecran est initialise au premier affichage (rafraichissement complet).
@@ -83,6 +86,7 @@ fn main() -> ! {
     loop {
         let now = clock::uptime_ms();
         if now >= next_tick {
+            watchdog.feed();
             launcher.tick();
             next_tick = now + TICK_MS;
         }
@@ -102,6 +106,19 @@ fn main() -> ! {
                         handle_time_command(input[4..].trim());
                         length = 0;
                         continue;
+                    }
+
+                    // Commandes de test des plantages (cf. system.rs, board.rs).
+                    if input == "TEST PANIC" {
+                        panic!("panic volontaire (commande TEST PANIC)");
+                    }
+                    if input == "TEST HANG" {
+                        esp_println::println!(
+                            "Blocage volontaire : le watchdog doit redemarrer la carte dans {} s.",
+                            board::WATCHDOG_TIMEOUT_S
+                        );
+                        #[allow(clippy::empty_loop)]
+                        loop {}
                     }
 
                     launcher.handle_input(Input::from_console_line(input));
