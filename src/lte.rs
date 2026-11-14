@@ -76,6 +76,16 @@ const CONFIGURE: [&str; 6] = [
     "AT+CSMP=17,167,0,8",  // SMS envoyes en UCS2 (dcs=8)
 ];
 const REATTACH: [&str; 2] = ["AT+CFUN=0", "AT+CFUN=1"];
+/// Commandes de `Request::Status`, envoyees l'une apres l'autre (une erreur
+/// n'arrete pas la suite).
+const STATUS: [&str; 6] = [
+    "AT+CPIN?",     // etat de la SIM
+    "AT+CEREG?",    // enregistrement sur le reseau 4G
+    "AT+COPS?",     // operateur et technologie radio
+    "AT+CSQ",       // niveau de signal
+    "AT+CBC",       // tension de la batterie (VBATT) vue par le module
+    "AT+CPMUTEMP",  // temperature du module
+];
 
 /// Demande a traiter quand le module est pret (commandes SMS de la console).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,6 +98,9 @@ pub enum Request {
     DeleteSms(u16),
     /// Envoyer le SMS prepare par `send_sms()`.
     SendSms,
+    /// Etat du module : SIM, reseau, operateur, signal, batterie,
+    /// temperature (STATUS[etape]).
+    Status(u8),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -384,6 +397,12 @@ impl Lte {
                 .map_err(|_| ()),
             Request::DeleteSms(index) => core::fmt::write(&mut command, format_args!("AT+CMGD={}", index))
                 .map_err(|_| ()),
+            Request::Status(step) => {
+                if step == 0 {
+                    esp_println::println!("--- Etat du module LTE ---");
+                }
+                command.push_str(STATUS[step as usize])
+            }
             Request::SendSms => {
                 let Some((number, _)) = &self.outgoing else {
                     self.state = State::Idle;
@@ -410,6 +429,17 @@ impl Lte {
             // Forme UCS2 refusee : on retente tout de suite avec "ALL" en clair.
             self.list_plain = true;
             let _ = self.requests.push_front(Request::ListSms);
+            return;
+        }
+        if let Request::Status(step) = request {
+            if failed {
+                esp_println::println!("{} : {}", STATUS[step as usize], self.error_label());
+            }
+            if (step as usize) + 1 < STATUS.len() {
+                let _ = self.requests.push_front(Request::Status(step + 1));
+            } else {
+                esp_println::println!("---");
+            }
             return;
         }
         if request == Request::SendSms {
@@ -578,7 +608,78 @@ impl Lte {
                 self.body = Body::Full;
             }
         }
+        // Reponses a `Request::Status` (affichees seulement pendant l'etat :
+        // +CPIN arrive aussi spontanement au demarrage du module).
+        else if matches!(self.state, State::Serving(Request::Status(_))) {
+            print_status_line(line);
+        }
         // Autres messages spontanes (+CTZV, SMS DONE, +CGEV...) : ignores.
+    }
+}
+
+/// Affiche en clair une reponse de `Request::Status`.
+fn print_status_line(line: &str) {
+    if let Some(rest) = line.strip_prefix("+CPIN: ") {
+        let label = if rest == "READY" { "prete" } else { rest };
+        esp_println::println!("SIM          : {}", label);
+    } else if let Some(rest) = line.strip_prefix("+CEREG: ") {
+        // +CEREG: <n>,<stat>[,...]
+        let stat = split_fields(rest).get(1).copied().unwrap_or("");
+        let label = match stat {
+            "0" => "non enregistre",
+            "1" => "enregistre",
+            "2" => "recherche en cours",
+            "3" => "refuse par le reseau",
+            "5" => "enregistre (itinerance)",
+            _ => "inconnu",
+        };
+        esp_println::println!("Reseau 4G    : {}", label);
+    } else if let Some(rest) = line.strip_prefix("+COPS: ") {
+        // +COPS: <mode>,<format>,"<operateur>",<techno>
+        let fields = split_fields(rest);
+        let mut code = String::<16>::new();
+        let _ = core::fmt::write(&mut code, format_args!("{}", Decoded::full(fields.get(2).copied().unwrap_or(""))));
+        let name = match code.as_str() {
+            "" => "aucun",
+            "20801" | "20802" => "Orange",
+            "20810" | "20811" | "20813" => "SFR",
+            "20815" | "20816" => "Free",
+            "20820" | "20821" | "20888" => "Bouygues Telecom",
+            other => other,
+        };
+        let technology = match fields.get(3).copied().unwrap_or("") {
+            "0" | "1" | "3" => "2G",
+            "2" | "4" | "5" | "6" => "3G",
+            "7" => "4G",
+            "" => "",
+            _ => "autre",
+        };
+        esp_println::println!("Operateur    : {} {} ({})", name, technology, code);
+    } else if let Some(rest) = line.strip_prefix("+CSQ: ") {
+        // +CSQ: <rssi>,<ber> ; rssi 0..31 -> -113..-51 dBm, 99 = inconnu
+        let rssi: u8 = split_fields(rest).first().and_then(|r| r.parse().ok()).unwrap_or(99);
+        if rssi > 31 {
+            esp_println::println!("Signal       : inconnu");
+        } else {
+            let dbm = -113 + 2 * rssi as i32;
+            let bars = match rssi {
+                0..=5 => 0,
+                6..=9 => 1,
+                10..=14 => 2,
+                15..=19 => 3,
+                20..=24 => 4,
+                _ => 5,
+            };
+            let mut gauge = String::<8>::new();
+            for i in 0..5 {
+                let _ = gauge.push(if i < bars { '#' } else { '.' });
+            }
+            esp_println::println!("Signal       : [{}] {} dBm (CSQ {})", gauge, dbm, rssi);
+        }
+    } else if let Some(rest) = line.strip_prefix("+CBC: ") {
+        esp_println::println!("Batterie     : {} (vue par le module, sur VBATT)", rest);
+    } else if let Some(rest) = line.strip_prefix("+CPMUTEMP: ") {
+        esp_println::println!("Temperature  : {} degC (module)", rest.trim());
     }
 }
 

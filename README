@@ -16,6 +16,7 @@ Compiler et flasher
 Commandes serie globales (valables dans toutes les apps) :
 
     TIME [AAAA-MM-JJ HH:MM[:SS]]         # affiche / regle l'heure
+    LTE                                  # etat du module : SIM, reseau, signal, batterie, temperature
     SMS                                  # liste les SMS stockes dans le module
     SMS LIRE <n>                         # affiche le SMS n en entier
     SMS SUPPR <n>                        # supprime le SMS n

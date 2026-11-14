@@ -119,6 +119,13 @@ fn main() -> ! {
                         continue;
                     }
 
+                    // LTE : etat du module (SIM, reseau, signal, batterie).
+                    if input.eq_ignore_ascii_case("LTE") {
+                        let _ = lte.request(Request::Status(0));
+                        length = 0;
+                        continue;
+                    }
+
                     // SMS : commandes globales, affichage sur la console (cf. lte.rs).
                     if input.eq_ignore_ascii_case("SMS")
                         || input.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("SMS "))
